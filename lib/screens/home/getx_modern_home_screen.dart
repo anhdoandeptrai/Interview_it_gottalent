@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 import '../../viewmodels/practice_viewmodel.dart';
 import '../../viewmodels/auth_viewmodel.dart';
 import '../../models/practice_session.dart';
+import '../practice/getx_modern_setup_screen.dart';
 
 class ModernHomeScreen extends StatelessWidget {
   const ModernHomeScreen({super.key});
@@ -254,8 +255,7 @@ class ModernHomeScreen extends StatelessWidget {
                     subtitle: 'Luyện tập phỏng vấn công việc',
                     icon: Icons.business_center,
                     color: const Color(0xFF10B981),
-                    onTap: () => Get.toNamed('/setup',
-                        arguments: {'mode': PracticeMode.interview}),
+                    onTap: () => Get.to(() => const ModernSetupScreen(mode: PracticeMode.interview)),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -265,8 +265,7 @@ class ModernHomeScreen extends StatelessWidget {
                     subtitle: 'Thực hành kỹ năng thuyết trình',
                     icon: Icons.campaign,
                     color: const Color(0xFF3B82F6),
-                    onTap: () => Get.toNamed('/setup',
-                        arguments: {'mode': PracticeMode.presentation}),
+                    onTap: () => Get.to(() => const ModernSetupScreen(mode: PracticeMode.presentation)),
                   ),
                 ),
               ],
