@@ -1,0 +1,336 @@
+import 'package:get/get.dart';
+import 'dart:io';
+import '../models/practice_session.dart';
+import '../services/local_firebase_service.dart';
+import '../services/sync_service.dart';
+import '../services/pdf_service.dart';
+import '../services/ai_service.dart';
+import '../services/speech_service.dart';
+import '../services/camera_service.dart';
+import '../controllers/auth_controller.dart';
+import '../routes/app_routes.dart';
+
+class PracticeController extends GetxController {
+  static PracticeController get to => Get.find();
+
+  final LocalFirebaseService _localFirebaseService = LocalFirebaseService();
+  final SyncService _syncService = SyncService();
+  final PdfService _pdfService = PdfService();
+  final SpeechService _speechService = SpeechService();
+  final CameraService _cameraService = CameraService();
+  late final AIService _aiService;
+
+  // Observable variables
+  final Rx<PracticeSession?> _currentSession = Rx<PracticeSession?>(null);
+  final RxList<PracticeSession> _sessionHistory = <PracticeSession>[].obs;
+  final Rx<SessionAnalytics?> _sessionAnalytics = Rx<SessionAnalytics?>(null);
+  final RxBool _isLoading = false.obs;
+  final RxBool _isSessionInProgress = false.obs;
+  final RxBool _isRecording = false.obs;
+  final RxString _errorMessage = ''.obs;
+  final RxString _currentQuestion = ''.obs;
+  final RxInt _currentQuestionIndex = 0.obs;
+  final RxDouble _sessionProgress = 0.0.obs;
+
+  // Getters
+  PracticeSession? get currentSession => _currentSession.value;
+  List<PracticeSession> get sessionHistory => _sessionHistory;
+  SessionAnalytics? get sessionAnalytics => _sessionAnalytics.value;
+  bool get isLoading => _isLoading.value;
+  bool get isSessionInProgress => _isSessionInProgress.value;
+  bool get isRecording => _isRecording.value;
+  String get errorMessage => _errorMessage.value;
+  String get currentQuestion => _currentQuestion.value;
+  int get currentQuestionIndex => _currentQuestionIndex.value;
+  double get sessionProgress => _sessionProgress.value;
+
+  // Reactive getters for binding
+  RxBool get isSessionInProgressRx => _isSessionInProgress;
+  RxBool get isRecordingRx => _isRecording;
+  RxDouble get sessionProgressRx => _sessionProgress;
+
+  @override
+  void onInit() {
+    super.onInit();
+    _initializeAI();
+    _initializeServices();
+    loadSessionHistory();
+  }
+
+  void _initializeAI() {
+    const geminiApiKey = 'AIzaSyAwhNSVlZXBcT39LPRgZ1ofamOpsHuNGT0';
+    _aiService = AIService(geminiApiKey: geminiApiKey);
+  }
+
+  Future<void> _initializeServices() async {
+    await _speechService.initialize();
+    await _cameraService.initialize();
+  }
+
+  // Create new practice session
+  Future<void> createSession({
+    required PracticeMode mode,
+    required File pdfFile,
+  }) async {
+    try {
+      _isLoading.value = true;
+      _errorMessage.value = '';
+
+      final authController = AuthController.to;
+      if (authController.currentUser == null) {
+        throw Exception('User not authenticated');
+      }
+
+      // Validate and extract PDF
+      final pdfValidation = await _pdfService.validatePdfFile(pdfFile);
+      if (!pdfValidation['isValid']) {
+        throw Exception(pdfValidation['error']);
+      }
+
+      final pdfResult = await _pdfService.extractTextFromPdf(pdfFile);
+      if (!pdfResult['success']) {
+        throw Exception(pdfResult['error']);
+      }
+
+      // Upload PDF file
+      final pdfUrl = await _localFirebaseService.uploadPdfFile(
+        pdfFile,
+        authController.currentUser!.uid,
+        DateTime.now().millisecondsSinceEpoch.toString(),
+      );
+
+      if (pdfUrl == null) {
+        throw Exception('Failed to upload PDF file');
+      }
+
+      // Generate questions using AI
+      final questions = await _aiService.generateQuestions(
+        pdfContent: pdfResult['text'],
+        mode: mode,
+        questionCount: 5,
+      );
+
+      // Create session
+      final session = PracticeSession(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        userId: authController.currentUser!.uid,
+        mode: mode,
+        pdfFileName: pdfFile.path.split('/').last,
+        pdfUrl: pdfUrl,
+        questions: questions,
+        answers: [],
+        startTime: DateTime.now(),
+        analytics: SessionAnalytics(
+          averageSpeakingSpeed: 0,
+          averageClarity: 0,
+          averageEyeContactRatio: 0,
+          averageScore: 0,
+          totalDuration: Duration.zero,
+          emotionAverages: {},
+          strengths: [],
+          weaknesses: [],
+          improvements: [],
+        ),
+      );
+
+      _currentSession.value = session;
+      await _localFirebaseService.savePracticeSession(session);
+
+      // Sync to Firebase for statistics
+      try {
+        await _syncService.savePracticeSession(session);
+        print('✅ Session synced to Firebase for statistics');
+      } catch (e) {
+        print('⚠️ Failed to sync session to Firebase: $e');
+        // Continue even if sync fails
+      }
+
+      Get.snackbar('Thành công', 'Tạo phiên luyện tập thành công!');
+      Get.toNamed(AppRoutes.PRACTICE_SESSION);
+    } catch (e) {
+      _errorMessage.value = e.toString();
+      Get.snackbar('Lỗi', e.toString());
+    } finally {
+      _isLoading.value = false;
+    }
+  }
+
+  // Start practice session
+  Future<void> startSession() async {
+    if (_currentSession.value == null) return;
+
+    try {
+      _isSessionInProgress.value = true;
+      _currentQuestionIndex.value = 0;
+      _sessionProgress.value = 0.0;
+
+      if (_currentSession.value!.questions.isNotEmpty) {
+        _currentQuestion.value = _currentSession.value!.questions.first;
+      }
+
+      await _cameraService.startPreview();
+    } catch (e) {
+      _errorMessage.value = e.toString();
+      Get.snackbar('Lỗi', e.toString());
+    }
+  }
+
+  // Start recording answer
+  Future<void> startAnswer() async {
+    try {
+      _isRecording.value = true;
+
+      await _speechService.startListening(
+        onResult: (result) {
+          // Handle speech result
+        },
+        onSoundLevel: (level) {
+          // Handle sound level
+        },
+      );
+
+      // Process camera emotion analysis here
+      // _cameraService.startEmotionAnalysis();
+    } catch (e) {
+      _errorMessage.value = e.toString();
+      Get.snackbar('Lỗi', e.toString());
+    }
+  }
+
+  // Stop recording answer
+  Future<void> stopAnswer() async {
+    try {
+      _isRecording.value = false;
+
+      await _speechService.stopListening();
+      // Process emotion data here
+      final emotionData = <EmotionData>[];
+      // final emotionData = _cameraService.stopEmotionAnalysis();
+
+      // Process and save answer
+      await _processAnswer(emotionData);
+
+      // Move to next question
+      _moveToNextQuestion();
+    } catch (e) {
+      _errorMessage.value = e.toString();
+      Get.snackbar('Lỗi', e.toString());
+    }
+  }
+
+  Future<void> _processAnswer(List<EmotionData> emotionData) async {
+    // Implementation for processing answer
+    // This would include AI evaluation, saving audio, etc.
+  }
+
+  void _moveToNextQuestion() {
+    if (_currentQuestionIndex.value <
+        _currentSession.value!.questions.length - 1) {
+      _currentQuestionIndex.value++;
+      _currentQuestion.value =
+          _currentSession.value!.questions[_currentQuestionIndex.value];
+      _sessionProgress.value = (_currentQuestionIndex.value + 1) /
+          _currentSession.value!.questions.length;
+    } else {
+      // Session completed
+      _endSession();
+    }
+  }
+
+  // End practice session
+  Future<void> _endSession() async {
+    try {
+      _isSessionInProgress.value = false;
+      _isRecording.value = false;
+
+      await _cameraService.stopPreview();
+
+      // Update session with end time
+      final updatedSession = PracticeSession(
+        id: _currentSession.value!.id,
+        userId: _currentSession.value!.userId,
+        mode: _currentSession.value!.mode,
+        pdfFileName: _currentSession.value!.pdfFileName,
+        pdfUrl: _currentSession.value!.pdfUrl,
+        questions: _currentSession.value!.questions,
+        answers: _currentSession.value!.answers,
+        startTime: _currentSession.value!.startTime,
+        endTime: DateTime.now(),
+        analytics: _calculateAnalytics(),
+        isCompleted: true,
+      );
+
+      _currentSession.value = updatedSession;
+      await _localFirebaseService.updatePracticeSession(updatedSession);
+
+      // Sync to Firebase for statistics
+      try {
+        await _syncService.savePracticeSession(updatedSession);
+        print('✅ Updated session synced to Firebase');
+      } catch (e) {
+        print('⚠️ Failed to sync updated session: $e');
+      }
+
+      // Load analytics for result screen
+      _sessionAnalytics.value = updatedSession.analytics;
+
+      Get.offAllNamed(AppRoutes.PRACTICE_RESULT);
+    } catch (e) {
+      _errorMessage.value = e.toString();
+      Get.snackbar('Lỗi', e.toString());
+    }
+  }
+
+  SessionAnalytics _calculateAnalytics() {
+    // Implementation for calculating session analytics
+    return SessionAnalytics(
+      averageSpeakingSpeed: 0,
+      averageClarity: 0,
+      averageEyeContactRatio: 0,
+      averageScore: 0,
+      totalDuration: Duration.zero,
+      emotionAverages: {},
+      strengths: [],
+      weaknesses: [],
+      improvements: [],
+    );
+  }
+
+  // Load session history
+  Future<void> loadSessionHistory() async {
+    try {
+      final authController = AuthController.to;
+      if (authController.currentUser == null) return;
+
+      final sessions = await _localFirebaseService.getUserPracticeSessions(
+        authController.currentUser!.uid,
+      );
+
+      _sessionHistory.assignAll(sessions);
+    } catch (e) {
+      _errorMessage.value = e.toString();
+    }
+  }
+
+  // Navigate to home
+  void navigateToHome() {
+    _currentSession.value = null;
+    _sessionAnalytics.value = null;
+    _isSessionInProgress.value = false;
+    _isRecording.value = false;
+    _currentQuestionIndex.value = 0;
+    _sessionProgress.value = 0.0;
+    Get.offAllNamed(AppRoutes.MAIN_NAVIGATION);
+  }
+
+  // Clear error message
+  void clearError() {
+    _errorMessage.value = '';
+  }
+
+  @override
+  void onClose() {
+    _cameraService.dispose();
+    super.onClose();
+  }
+}

@@ -1,0 +1,21 @@
+// Firebase Storage Security Rules for Interview App
+// Copy this content to Firebase Console > Storage > Rules
+
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Allow authenticated users to upload and read their own files
+    match /pdfs/{userId}/{sessionId}/{fileName} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    match /audio/{userId}/{sessionId}/{fileName} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Temporary: Allow all reads and writes for testing (REMOVE IN PRODUCTION)
+    match /{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

@@ -1,0 +1,121 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // ==================================================
+    // PDF FILES (User uploads)
+    // ==================================================
+    match /pdfs/{userId}/{sessionId}/{fileName} {
+      // Allow authenticated users to upload their own PDFs
+      allow write: if request.auth != null && 
+        request.auth.uid == userId &&
+        validatePdfFile(request, fileName);
+      
+      // Allow users to read their own uploaded PDFs
+      allow read: if request.auth != null && 
+        request.auth.uid == userId;
+    }
+    
+    // ==================================================
+    // AUDIO FILES (Recorded answers)
+    // ==================================================
+    match /audio/{userId}/{sessionId}/{fileName} {
+      // Allow authenticated users to upload their own audio
+      allow write: if request.auth != null && 
+        request.auth.uid == userId &&
+        validateAudioFile(request, fileName);
+      
+      // Allow users to read their own audio files
+      allow read: if request.auth != null && 
+        request.auth.uid == userId;
+    }
+    
+    // ==================================================
+    // USER PROFILE IMAGES (Optional)
+    // ==================================================
+    match /profiles/{userId}/{fileName} {
+      // Allow users to upload their own profile images
+      allow write: if request.auth != null && 
+        request.auth.uid == userId &&
+        validateImageFile(request, fileName);
+      
+      // Allow users to read their own profile images
+      allow read: if request.auth != null && 
+        request.auth.uid == userId;
+    }
+    
+    // ==================================================
+    // TEMPORARY FILES (For processing)
+    // ==================================================
+    match /temp/{userId}/{fileName} {
+      // Allow authenticated users to upload temporary files
+      allow write: if request.auth != null && 
+        request.auth.uid == userId &&
+        request.resource.size < 100 * 1024 * 1024; // 100MB limit
+      
+      // Allow users to read their own temp files
+      allow read: if request.auth != null && 
+        request.auth.uid == userId;
+      
+      // Allow deletion of temp files
+      allow delete: if request.auth != null && 
+        request.auth.uid == userId;
+    }
+    
+    // ==================================================
+    // PUBLIC ASSETS (App resources)
+    // ==================================================
+    match /public/{allPaths=**} {
+      // Allow all authenticated users to read public assets
+      allow read: if request.auth != null;
+      // Only admins can write public assets
+      allow write: if false; // Implement admin check if needed
+    }
+    
+    // ==================================================
+    // TEMPORARY: Allow all authenticated users (DEVELOPMENT ONLY)
+    // REMOVE OR COMMENT OUT IN PRODUCTION
+    // ==================================================
+    match /{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // ==================================================
+    // VALIDATION FUNCTIONS
+    // ==================================================
+    
+    // Validate PDF file uploads
+    function validatePdfFile(request, fileName) {
+      return request.resource.size < 50 * 1024 * 1024 && // 50MB limit
+        request.resource.contentType == 'application/pdf' &&
+        fileName.matches('.*\\.pdf$');
+    }
+    
+    // Validate audio file uploads
+    function validateAudioFile(request, fileName) {
+      return request.resource.size < 100 * 1024 * 1024 && // 100MB limit
+        request.resource.contentType.matches('audio/.*') &&
+        (fileName.matches('.*\\.mp3$') || 
+         fileName.matches('.*\\.wav$') || 
+         fileName.matches('.*\\.m4a$') ||
+         fileName.matches('.*\\.aac$'));
+    }
+    
+    // Validate image file uploads
+    function validateImageFile(request, fileName) {
+      return request.resource.size < 10 * 1024 * 1024 && // 10MB limit
+        request.resource.contentType.matches('image/.*') &&
+        (fileName.matches('.*\\.jpg$') || 
+         fileName.matches('.*\\.jpeg$') || 
+         fileName.matches('.*\\.png$') ||
+         fileName.matches('.*\\.gif$') ||
+         fileName.matches('.*\\.webp$'));
+    }
+    
+    // Check if user has sufficient quota (implement if needed)
+    function hasStorageQuota(userId) {
+      // Implement logic to check user storage usage
+      return true; // Placeholder
+    }
+  }
+}
