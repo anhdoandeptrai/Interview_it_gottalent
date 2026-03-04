@@ -314,38 +314,140 @@ class ModernSetupScreen extends StatelessWidget {
   }
 
   Widget _buildStartButton(PracticeViewModel viewModel) {
-    return Obx(() => SizedBox(
-          height: 56,
-          child: ElevatedButton(
-            onPressed: viewModel.isBusy || viewModel.selectedFile == null
-                ? null
-                : () => viewModel.startPractice(),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF10B981),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
+    return Obx(() {
+      final isProcessing = viewModel.isBusy || viewModel.isPdfProcessing;
+      final isDisabled = isProcessing || viewModel.selectedFile == null;
+
+      return Column(
+        children: [
+          // Progress indicator khi đang xử lý
+          if (isProcessing) ...[
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.05),
                 borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: const Color(0xFF667EEA).withOpacity(0.3),
+                ),
               ),
-              elevation: 0,
-            ),
-            child: viewModel.isBusy
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                    ),
-                  )
-                : const Text(
-                    'Bắt đầu luyện tập',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+              child: Column(
+                children: [
+                  // Progress bar
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: LinearProgressIndicator(
+                      value: viewModel.processingProgress,
+                      backgroundColor: Colors.white.withOpacity(0.1),
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                        Color(0xFF667EEA),
+                      ),
+                      minHeight: 8,
                     ),
                   ),
+                  const SizedBox(height: 12),
+                  // Processing step text
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white.withOpacity(0.7),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          viewModel.processingStep,
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.8),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  // Extra info when generating questions
+                  if (viewModel.isGeneratingQuestions) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      '🤖 AI đang phân tích nội dung và tạo câu hỏi phù hợp...',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.6),
+                        fontSize: 12,
+                        fontStyle: FontStyle.italic,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          // Start button
+          SizedBox(
+            height: 56,
+            child: ElevatedButton(
+              onPressed: isDisabled ? null : () => viewModel.startPractice(),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF10B981),
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: Colors.grey.withOpacity(0.3),
+                disabledForegroundColor: Colors.white.withOpacity(0.5),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                elevation: 0,
+              ),
+              child: isProcessing
+                  ? Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          'Đang xử lý...',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    )
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: const [
+                        Icon(Icons.play_arrow_rounded, size: 24),
+                        SizedBox(width: 8),
+                        Text(
+                          'Bắt đầu luyện tập',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
           ),
-        ));
+        ],
+      );
+    });
   }
 
   Widget _buildErrorMessage(String message) {

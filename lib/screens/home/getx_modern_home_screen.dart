@@ -255,7 +255,8 @@ class ModernHomeScreen extends StatelessWidget {
                     subtitle: 'Luyện tập phỏng vấn công việc',
                     icon: Icons.business_center,
                     color: const Color(0xFF10B981),
-                    onTap: () => Get.to(() => const ModernSetupScreen(mode: PracticeMode.interview)),
+                    onTap: () => Get.to(() =>
+                        const ModernSetupScreen(mode: PracticeMode.interview)),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -265,7 +266,8 @@ class ModernHomeScreen extends StatelessWidget {
                     subtitle: 'Thực hành kỹ năng thuyết trình',
                     icon: Icons.campaign,
                     color: const Color(0xFF3B82F6),
-                    onTap: () => Get.to(() => const ModernSetupScreen(mode: PracticeMode.presentation)),
+                    onTap: () => Get.to(() => const ModernSetupScreen(
+                        mode: PracticeMode.presentation)),
                   ),
                 ),
               ],
@@ -517,15 +519,6 @@ class ModernHomeScreen extends StatelessWidget {
         authViewModel.signOut();
         break;
     }
-  }
-
-  void _showRecentResults(PracticeViewModel practiceViewModel) {
-    Get.snackbar(
-      'Kết quả',
-      'Đang tải kết quả gần đây...',
-      backgroundColor: Colors.blue.withOpacity(0.8),
-      colorText: Colors.white,
-    );
   }
 
   void _showAllSessions(PracticeViewModel practiceViewModel) {

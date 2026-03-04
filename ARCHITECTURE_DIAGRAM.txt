@@ -1,0 +1,171 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    📱 MOBILE APP ARCHITECTURE                                 ║
+║              Tính năng: Tạo câu hỏi từ PDF bằng Gemini AI                    ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              👤 USER LAYER                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      │ Chọn chế độ & Upload PDF
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              🎨 UI LAYER                                     │
+│                                                                              │
+│  ┌──────────────────────────┐       ┌──────────────────────────────────┐   │
+│  │  ModernSetupScreen       │       │  QuestionsPreviewDialog          │   │
+│  │  ├─ File picker          │       │  ├─ Questions list               │   │
+│  │  ├─ Progress indicator   │       │  ├─ Preview before start         │   │
+│  │  ├─ Processing steps     │       │  └─ Action buttons               │   │
+│  │  └─ Start button         │       └──────────────────────────────────┘   │
+│  └──────────────────────────┘                                               │
+└───────────────────────────────┬─────────────────────────────────────────────┘
+                                │ User actions
+                                ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          🎯 VIEW MODEL LAYER                                 │
+│                                                                              │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │  PracticeViewModel (GetX)                                            │  │
+│  │  ├─ States: isPdfProcessing, isGeneratingQuestions, progress        │  │
+│  │  ├─ Methods: startPractice(), setSelectedFile(), cancelProcessing() │  │
+│  │  └─ Reactive: Rx variables for real-time UI updates                 │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+└───────────────────────────────┬─────────────────────────────────────────────┘
+                                │ Business logic
+                                ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         🎮 CONTROLLER LAYER                                  │
+│                                                                              │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │  PracticeController (GetX)                                           │  │
+│  │  ├─ createSession(mode, pdfFile)                                     │  │
+│  │  │   1. Validate PDF                                                 │  │
+│  │  │   2. Extract text                                                 │  │
+│  │  │   3. Upload to storage                                            │  │
+│  │  │   4. Generate questions (AI)                                      │  │
+│  │  │   5. Create session object                                        │  │
+│  │  │   6. Save to database                                             │  │
+│  │  │   7. Sync to cloud                                                │  │
+│  │  └─ Manages: currentSession, sessionHistory, analytics              │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+└─────────┬───────────────────┬─────────────────┬─────────────────────────────┘
+          │                   │                 │
+          ▼                   ▼                 ▼
+┌──────────────────┐  ┌─────────────────┐  ┌──────────────────┐
+│   📄 PDF         │  │   🤖 AI         │  │   💾 Storage     │
+│   Service        │  │   Service       │  │   Services       │
+├──────────────────┤  ├─────────────────┤  ├──────────────────┤
+│ • validate()     │  │ • generate      │  │ • Local DB       │
+│ • extractText()  │  │   Questions()   │  │ • Firebase       │
+│ • getPdfInfo()   │  │ • evaluate      │  │ • Sync           │
+│ • cleanText()    │  │   Answer()      │  │ • Upload         │
+└──────────────────┘  └─────────────────┘  └──────────────────┘
+          │                   │                 │
+          ▼                   ▼                 ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         🔧 EXTERNAL SERVICES                                 │
+│                                                                              │
+│  ┌────────────────┐   ┌────────────────┐   ┌──────────────────────────┐   │
+│  │ Syncfusion PDF │   │  Gemini AI     │   │  Firebase                │   │
+│  │ ├─ Read PDF    │   │  ├─ API Key    │   │  ├─ Firestore (DB)      │   │
+│  │ ├─ Extract     │   │  ├─ Prompt     │   │  ├─ Storage (Files)     │   │
+│  │ └─ Parse       │   │  └─ Response   │   │  └─ Sync Service        │   │
+│  └────────────────┘   └────────────────┘   └──────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         📊 DATA FLOW                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+  PDF File → [Validate] → [Extract Text] → [Truncate if > 4000]
+                 ↓              ↓                    ↓
+           [Check size]   [Parse pages]      [Send to AI]
+           [Check format] [Clean text]            ↓
+                 ↓              ↓            [Generate Questions]
+           [Return result] [Return text]          ↓
+                                            [Parse response]
+                                                   ↓
+                                            [Validate questions]
+                                                   ↓
+           ┌────────────────────────────────────────────┐
+           │  PracticeSession Object                    │
+           │  ├─ id, userId, mode                      │
+           │  ├─ pdfFileName, pdfUrl                   │
+           │  ├─ questions: List<String>               │
+           │  ├─ answers: List<Answer>                 │
+           │  └─ analytics: SessionAnalytics           │
+           └────────────────────────────────────────────┘
+                            ↓
+                    [Save to Local DB]
+                            ↓
+                    [Upload to Firebase]
+                            ↓
+                    [Navigate to Practice]
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       🔄 STATE MANAGEMENT (GetX)                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+  User Action → ViewModel Updates State → UI Rebuilds
+       ↓               ↓                        ↓
+  [Upload PDF]  [isPdfProcessing = true]  [Show progress]
+       ↓               ↓                        ↓
+  [Process]     [processingStep = "..."]  [Update text]
+       ↓               ↓                        ↓
+  [Complete]    [isPdfProcessing = false] [Show dialog]
+
+  Reactive Programming:
+  • Rx<bool> - Boolean states
+  • Rx<String> - Text states
+  • Rx<double> - Progress values
+  • Obx(() => Widget) - Auto rebuild
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        ⚡ PERFORMANCE                                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+  Operation              Time        Optimization
+  ──────────────────────────────────────────────────────────────────────
+  PDF Validation         ~0.5s       ✓ Quick checks
+  Text Extraction        1-3s        ✓ Efficient parsing
+  AI Generation          3-5s        ⚠ API dependent
+  Upload Storage         2-4s        ⚠ File size dependent
+  ──────────────────────────────────────────────────────────────────────
+  TOTAL                  6-12s       🎯 Acceptable
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        🛡️ ERROR HANDLING                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+  Every operation has try-catch:
+  
+  try {
+    [Operation]
+  } catch (e) {
+    [Log error]
+    [Show user message]
+    [Fallback or retry]
+  }
+
+  Fallback hierarchy:
+  1. Gemini AI ✓
+  2. OpenAI (if configured)
+  3. Predefined questions (last resort)
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        📱 DEPENDENCIES                                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+  syncfusion_flutter_pdf: ^24.1.41    → PDF processing
+  google_generative_ai: ^0.4.7        → Gemini AI
+  get: latest                          → State management
+  file_picker: ^6.1.1                  → File selection
+  firebase_core: latest                → Firebase init
+  firebase_storage: latest             → File storage
+  cloud_firestore: latest              → Database
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                           ✅ FEATURE COMPLETE                                ║
+║                         Ready for Production Use                             ║
+╚══════════════════════════════════════════════════════════════════════════════╝

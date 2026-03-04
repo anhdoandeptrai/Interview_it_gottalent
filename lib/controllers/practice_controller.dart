@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'dart:io';
 import '../models/practice_session.dart';
@@ -49,6 +50,12 @@ class PracticeController extends GetxController {
   RxBool get isRecordingRx => _isRecording;
   RxDouble get sessionProgressRx => _sessionProgress;
 
+  // Camera controller getter
+  get cameraController => _cameraService.controller;
+
+  // Camera service getter for behavior detection
+  CameraService? get cameraService => _cameraService;
+
   @override
   void onInit() {
     super.onInit();
@@ -58,7 +65,7 @@ class PracticeController extends GetxController {
   }
 
   void _initializeAI() {
-    const geminiApiKey = 'AIzaSyAwhNSVlZXBcT39LPRgZ1ofamOpsHuNGT0';
+    const geminiApiKey = 'AIzaSyDydED8YiFYXoW9Qq3woSlGaqC3ikrWhMs';
     _aiService = AIService(geminiApiKey: geminiApiKey);
   }
 
@@ -81,18 +88,49 @@ class PracticeController extends GetxController {
         throw Exception('User not authenticated');
       }
 
-      // Validate and extract PDF
+      print('📄 Starting PDF processing...');
+
+      // Step 1: Validate PDF file
       final pdfValidation = await _pdfService.validatePdfFile(pdfFile);
       if (!pdfValidation['isValid']) {
         throw Exception(pdfValidation['error']);
       }
 
-      final pdfResult = await _pdfService.extractTextFromPdf(pdfFile);
+      print('✅ PDF validation passed: ${pdfValidation['fileSize']} bytes');
+      print('📖 Extracting text from PDF...');
+
+      // Step 2: Extract text from PDF with timeout (60 seconds max)
+      final pdfResult = await _pdfService.extractTextFromPdf(pdfFile).timeout(
+        const Duration(seconds: 60),
+        onTimeout: () {
+          print('⏱️ PDF extraction timeout after 60 seconds');
+          return {
+            'success': false,
+            'error': 'Quá thời gian xử lý PDF. Vui lòng thử file nhỏ hơn.',
+            'text': '',
+            'pageCount': 0,
+            'wordCount': 0,
+          };
+        },
+      );
+
       if (!pdfResult['success']) {
-        throw Exception(pdfResult['error']);
+        throw Exception(
+            pdfResult['error'] ?? 'Không thể trích xuất nội dung từ PDF');
       }
 
-      // Upload PDF file
+      final extractedText = pdfResult['text'] as String;
+      final pageCount = pdfResult['pageCount'] as int;
+      final wordCount = pdfResult['wordCount'] as int;
+
+      print('✅ Text extracted successfully:');
+      print('   - Pages: $pageCount');
+      print('   - Words: $wordCount');
+      print(
+          '   - Text preview: ${extractedText.substring(0, extractedText.length > 100 ? 100 : extractedText.length)}...');
+
+      // Step 3: Upload PDF file to storage
+      print('☁️ Uploading PDF to storage...');
       final pdfUrl = await _localFirebaseService.uploadPdfFile(
         pdfFile,
         authController.currentUser!.uid,
@@ -100,17 +138,30 @@ class PracticeController extends GetxController {
       );
 
       if (pdfUrl == null) {
-        throw Exception('Failed to upload PDF file');
+        throw Exception('Không thể tải file PDF lên storage');
       }
 
-      // Generate questions using AI
+      print('✅ PDF uploaded: $pdfUrl');
+      print('🤖 Generating questions with Gemini AI...');
+
+      // Step 4: Generate questions using AI
       final questions = await _aiService.generateQuestions(
-        pdfContent: pdfResult['text'],
+        pdfContent: extractedText,
         mode: mode,
         questionCount: 5,
       );
 
-      // Create session
+      if (questions.isEmpty) {
+        throw Exception(
+            'AI không thể tạo câu hỏi từ nội dung PDF. Vui lòng thử file khác.');
+      }
+
+      print('✅ Generated ${questions.length} questions:');
+      for (var i = 0; i < questions.length; i++) {
+        print('   ${i + 1}. ${questions[i]}');
+      }
+
+      // Step 5: Create session object
       final session = PracticeSession(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
         userId: authController.currentUser!.uid,
@@ -134,18 +185,32 @@ class PracticeController extends GetxController {
       );
 
       _currentSession.value = session;
-      await _localFirebaseService.savePracticeSession(session);
 
-      // Sync to Firebase for statistics
+      // Step 6: Save to local database
+      print('💾 Saving session to local database...');
+      await _localFirebaseService.savePracticeSession(session);
+      print('✅ Session saved locally');
+
+      // Step 7: Sync to Firebase for statistics (optional, continue if fails)
       try {
+        print('☁️ Syncing session to Firebase...');
         await _syncService.savePracticeSession(session);
         print('✅ Session synced to Firebase for statistics');
-      } catch (e) {
-        print('⚠️ Failed to sync session to Firebase: $e');
-        // Continue even if sync fails
+      } catch (syncError) {
+        print('⚠️ Warning: Failed to sync session to Firebase: $syncError');
+        // Continue anyway - local session is saved
       }
 
-      Get.snackbar('Thành công', 'Tạo phiên luyện tập thành công!');
+      print('🎉 Session created successfully!');
+      Get.snackbar(
+        '✅ Thành công',
+        'Đã tạo ${questions.length} câu hỏi từ nội dung PDF',
+        backgroundColor: const Color(0xFF10B981),
+        colorText: Colors.white,
+        duration: const Duration(seconds: 2),
+      );
+
+      // Navigate to practice screen
       Get.toNamed(AppRoutes.PRACTICE_SESSION);
     } catch (e) {
       _errorMessage.value = e.toString();
@@ -234,6 +299,22 @@ class PracticeController extends GetxController {
     } else {
       // Session completed
       _endSession();
+    }
+  }
+
+  // Move to specific question (for navigation)
+  void moveToQuestion(int index) {
+    if (_currentSession.value == null) return;
+    if (index < 0 || index >= _currentSession.value!.questions.length) return;
+
+    _currentQuestionIndex.value = index;
+    _currentQuestion.value = _currentSession.value!.questions[index];
+    _sessionProgress.value =
+        (index + 1) / _currentSession.value!.questions.length;
+
+    // Stop recording if moving between questions
+    if (_isRecording.value) {
+      stopAnswer();
     }
   }
 

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
 class PdfService {
@@ -59,6 +60,7 @@ class PdfService {
   }
 
   // Extract text from PDF file with enhanced error handling
+  // Now runs in separate isolate to prevent UI blocking
   Future<Map<String, dynamic>> extractTextFromPdf(File pdfFile) async {
     Map<String, dynamic> result = {
       'success': false,
@@ -82,45 +84,98 @@ class PdfService {
       print(
           'PDF Service: PDF validation passed, file size: ${validation['fileSize']} bytes');
 
-      // Load the PDF document
-      final bytes = await pdfFile.readAsBytes();
+      // Run PDF extraction in separate isolate to prevent blocking UI
+      try {
+        final bytes = await pdfFile.readAsBytes();
+        final fileSize = bytes.length;
+
+        print(
+            'PDF Service: File read into memory (${(fileSize / 1024).toStringAsFixed(2)} KB), starting extraction in isolate...');
+
+        // Safety check: If file > 10MB, warn but continue
+        if (fileSize > 10 * 1024 * 1024) {
+          print(
+              'PDF Service: WARNING - Large file detected (${(fileSize / 1024 / 1024).toStringAsFixed(2)} MB), extraction may take longer...');
+        }
+
+        // Use compute to run in separate isolate
+        final extractedData = await compute(_extractTextInIsolate, bytes);
+
+        print('PDF Service: Extraction completed in isolate');
+
+        if (extractedData['error'] != null) {
+          result['error'] = extractedData['error'];
+          print('PDF Service: Extraction error - ${result['error']}');
+          return result;
+        }
+
+        String extractedText = extractedData['text'] ?? '';
+        result['pageCount'] = extractedData['pageCount'] ?? 0;
+
+        // Clean and validate extracted text
+        extractedText = cleanExtractedText(extractedText);
+
+        if (extractedText.trim().isEmpty) {
+          result['error'] = 'No text found in PDF file';
+          print('PDF Service: No text content extracted');
+          return result;
+        }
+
+        result['text'] = extractedText;
+        result['wordCount'] = extractedText.split(RegExp(r'\s+')).length;
+        result['success'] = true;
+
+        print(
+            'PDF Service: Text extraction successful - ${result['wordCount']} words extracted');
+
+        return result;
+      } catch (e) {
+        print('PDF Service: Error during extraction: $e');
+        result['error'] = 'Failed to extract text: $e';
+        return result;
+      }
+    } catch (e) {
+      print('PDF Service: Error extracting text from PDF: $e');
+      result['error'] = 'Failed to extract text from PDF: $e';
+      return result;
+    }
+  }
+
+  // Static method to run in isolate
+  static Map<String, dynamic> _extractTextInIsolate(List<int> bytes) {
+    try {
+      print('Isolate: Loading PDF document...');
       final PdfDocument document = PdfDocument(inputBytes: bytes);
 
-      print(
-          'PDF Service: PDF document loaded, page count: ${document.pages.count}');
-      result['pageCount'] = document.pages.count;
+      print('Isolate: PDF loaded, page count: ${document.pages.count}');
 
       // Create a text extractor
       final PdfTextExtractor extractor = PdfTextExtractor(document);
 
       // Extract text from all pages
+      print('Isolate: Extracting text...');
       String extractedText = extractor.extractText();
 
-      // Clean and validate extracted text
-      extractedText = cleanExtractedText(extractedText);
-
-      if (extractedText.trim().isEmpty) {
-        document.dispose();
-        result['error'] = 'No text found in PDF file';
-        print('PDF Service: No text content extracted');
-        return result;
-      }
-
-      result['text'] = extractedText;
-      result['wordCount'] = extractedText.split(RegExp(r'\s+')).length;
-      result['success'] = true;
-
-      print(
-          'PDF Service: Text extraction successful - ${result['wordCount']} words extracted');
+      final result = {
+        'text': extractedText,
+        'pageCount': document.pages.count,
+        'error': null,
+      };
 
       // Dispose the document
       document.dispose();
 
+      print(
+          'Isolate: Extraction complete, text length: ${extractedText.length}');
+
       return result;
     } catch (e) {
-      print('PDF Service: Error extracting text from PDF: $e');
-      result['error'] = 'Failed to extract text from PDF: $e';
-      return result;
+      print('Isolate: Error extracting text: $e');
+      return {
+        'text': null,
+        'pageCount': 0,
+        'error': 'Extraction error: $e',
+      };
     }
   }
 

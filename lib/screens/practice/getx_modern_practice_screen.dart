@@ -1,9 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:camera/camera.dart';
 import '../../viewmodels/practice_viewmodel.dart';
+import '../../controllers/practice_controller.dart';
+// import '../../widgets/behavior_badge_widget.dart'; // TẮT
+// import '../../models/behavior_result.dart'; // TẮT
 
-class ModernPracticeScreen extends StatelessWidget {
+class ModernPracticeScreen extends StatefulWidget {
   const ModernPracticeScreen({super.key});
+
+  @override
+  State<ModernPracticeScreen> createState() => _ModernPracticeScreenState();
+}
+
+class _ModernPracticeScreenState extends State<ModernPracticeScreen> {
+  // bool _showBehaviorHistory = false; // TẮT
+
+  @override
+  void initState() {
+    super.initState();
+    // Start session and camera when screen loads
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final practiceController = Get.find<PracticeController>();
+      await practiceController.startSession();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -32,22 +53,26 @@ class ModernPracticeScreen extends StatelessWidget {
             ],
           ),
           body: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  _buildProgressBar(viewModel),
-                  const SizedBox(height: 20),
-                  _buildQuestionCard(viewModel),
-                  const SizedBox(height: 20),
-                  Expanded(
-                    child: _buildCameraPreview(viewModel),
-                  ),
-                  const SizedBox(height: 20),
-                  _buildControlButtons(viewModel),
-                  const SizedBox(height: 20),
-                  _buildInstructionText(viewModel),
-                ],
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    _buildProgressBar(viewModel),
+                    const SizedBox(height: 16),
+                    _buildQuestionCard(viewModel),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      height: MediaQuery.of(context).size.height * 0.4,
+                      child: _buildCameraPreview(viewModel),
+                    ),
+                    const SizedBox(height: 16),
+                    _buildControlButtons(viewModel),
+                    const SizedBox(height: 12),
+                    _buildInstructionText(viewModel),
+                    const SizedBox(height: 16),
+                  ],
+                ),
               ),
             ),
           ),
@@ -98,6 +123,10 @@ class ModernPracticeScreen extends StatelessWidget {
   }
 
   Widget _buildQuestionCard(PracticeViewModel viewModel) {
+    final session = viewModel.currentSession;
+    final questionNumber = viewModel.currentQuestionIndex + 1;
+    final totalQuestions = session?.questions.length ?? 0;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -117,26 +146,47 @@ class ModernPracticeScreen extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF667EEA),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(
-                  Icons.quiz,
-                  color: Colors.white,
-                  size: 20,
-                ),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF667EEA),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.quiz,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Text(
+                    'Câu hỏi',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 12),
-              const Text(
-                'Câu hỏi',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '$questionNumber/$totalQuestions',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ],
@@ -158,6 +208,9 @@ class ModernPracticeScreen extends StatelessWidget {
   }
 
   Widget _buildCameraPreview(PracticeViewModel viewModel) {
+    final practiceController = Get.find<PracticeController>();
+    final cameraController = practiceController.cameraController;
+
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
@@ -167,32 +220,104 @@ class ModernPracticeScreen extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         child: Stack(
           children: [
-            // Camera preview placeholder
-            Container(
-              width: double.infinity,
-              height: double.infinity,
-              color: Colors.black26,
-              child: const Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.videocam_outlined,
-                      size: 64,
-                      color: Colors.white54,
-                    ),
-                    SizedBox(height: 16),
-                    Text(
-                      'Camera Preview',
-                      style: TextStyle(
-                        color: Colors.white54,
-                        fontSize: 16,
+            // Camera preview (real or placeholder)
+            cameraController != null && cameraController.value.isInitialized
+                ? SizedBox(
+                    width: double.infinity,
+                    height: double.infinity,
+                    child: FittedBox(
+                      fit: BoxFit.cover,
+                      child: SizedBox(
+                        width: cameraController.value.previewSize!.height,
+                        height: cameraController.value.previewSize!.width,
+                        child: CameraPreview(cameraController),
                       ),
                     ),
-                  ],
-                ),
-              ),
-            ),
+                  )
+                : Container(
+                    width: double.infinity,
+                    height: double.infinity,
+                    color: Colors.black26,
+                    child: const Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          CircularProgressIndicator(
+                            color: Colors.white54,
+                          ),
+                          SizedBox(height: 16),
+                          Text(
+                            'Đang khởi động camera...',
+                            style: TextStyle(
+                              color: Colors.white54,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+            // TẮT AI BEHAVIOR DETECTION ĐỂ TRÁNH CRASH
+            // // AI Behavior Badge
+            // StreamBuilder<BehaviorResult>(
+            //   stream: practiceController.cameraService?.behaviorStream,
+            //   builder: (context, snapshot) {
+            //     return BehaviorBadgeWidget(
+            //       behavior: snapshot.data,
+            //       isLoading: !practiceController.cameraService!.isInitialized,
+            //       isEnabled: true,
+            //       onToggle: () {
+            //         // Toggle behavior detection
+            //         setState(() {
+            //           practiceController.cameraService?.setBehaviorDetection(
+            //               practiceController.cameraService?.behaviorDetector
+            //                       .isInitialized !=
+            //                   true);
+            //         });
+            //       },
+            //     );
+            //   },
+            // ),
+
+            // // Behavior History Panel (bottom right)
+            // if (_showBehaviorHistory)
+            //   Positioned(
+            //     bottom: 16,
+            //     right: 16,
+            //     left: 16,
+            //     child: BehaviorHistoryPanel(
+            //       behaviors: practiceController
+            //               .cameraService?.behaviorDetector.behaviorHistory ??
+            //           [],
+            //       statistics:
+            //           practiceController.cameraService?.behaviorStatistics,
+            //     ),
+            //   ),
+
+            // // Toggle History Button
+            // Positioned(
+            //   bottom: 16,
+            //   right: 16,
+            //   child: IconButton(
+            //     onPressed: () {
+            //       setState(() {
+            //         _showBehaviorHistory = !_showBehaviorHistory;
+            //       });
+            //     },
+            //     icon: Container(
+            //       padding: const EdgeInsets.all(8),
+            //       decoration: BoxDecoration(
+            //         color: Colors.black.withOpacity(0.6),
+            //         borderRadius: BorderRadius.circular(8),
+            //       ),
+            //       child: Icon(
+            //         _showBehaviorHistory ? Icons.close : Icons.analytics,
+            //         color: Colors.white,
+            //       ),
+            //     ),
+            //   ),
+            // ),
 
             // Recording indicator
             Obx(() => viewModel.isRecording
@@ -276,7 +401,8 @@ class ModernPracticeScreen extends StatelessWidget {
                 viewModel.startAnswer();
               }
             },
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
         width: 80,
         height: 80,
         decoration: BoxDecoration(
@@ -293,16 +419,50 @@ class ModernPracticeScreen extends StatelessWidget {
               color: (viewModel.isRecording
                       ? const Color(0xFFEF4444)
                       : const Color(0xFF10B981))
-                  .withOpacity(0.3),
-              blurRadius: 20,
-              spreadRadius: 0,
+                  .withOpacity(0.5),
+              blurRadius: viewModel.isRecording ? 30 : 20,
+              spreadRadius: viewModel.isRecording ? 5 : 0,
             ),
           ],
         ),
-        child: Icon(
-          viewModel.isRecording ? Icons.stop : Icons.mic,
-          color: Colors.white,
-          size: 32,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // Pulse effect when recording
+            if (viewModel.isRecording)
+              TweenAnimationBuilder(
+                key: ValueKey(viewModel.isRecording),
+                tween: Tween<double>(begin: 0.8, end: 1.2),
+                duration: const Duration(milliseconds: 800),
+                onEnd: () {
+                  if (viewModel.isRecording && mounted) {
+                    setState(() {}); // Rebuild to restart animation
+                  }
+                },
+                builder: (context, double value, child) {
+                  return Transform.scale(
+                    scale: value,
+                    child: Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.red.withOpacity(0.3),
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            // Icon
+            Icon(
+              viewModel.isRecording ? Icons.stop_rounded : Icons.mic,
+              color: Colors.white,
+              size: 32,
+            ),
+          ],
         ),
       ),
     );
@@ -332,28 +492,54 @@ class ModernPracticeScreen extends StatelessWidget {
   }
 
   Widget _buildInstructionText(PracticeViewModel viewModel) {
+    String instruction;
+    IconData icon;
+    Color iconColor;
+
+    if (viewModel.isRecording) {
+      instruction = '🎤 Đang ghi âm... Nói câu trả lời của bạn';
+      icon = Icons.mic;
+      iconColor = Colors.red;
+    } else if (viewModel.currentQuestion.isNotEmpty) {
+      instruction = 'Nhấn nút ghi âm để bắt đầu trả lời câu hỏi';
+      icon = Icons.info_outline;
+      iconColor = Colors.white.withOpacity(0.7);
+    } else {
+      instruction = 'Đang tải câu hỏi...';
+      icon = Icons.hourglass_empty;
+      iconColor = Colors.white.withOpacity(0.7);
+    }
+
     return Obx(() => Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.05),
+            color: viewModel.isRecording
+                ? Colors.red.withOpacity(0.1)
+                : Colors.white.withOpacity(0.05),
             borderRadius: BorderRadius.circular(12),
+            border: viewModel.isRecording
+                ? Border.all(color: Colors.red.withOpacity(0.3))
+                : null,
           ),
           child: Row(
             children: [
               Icon(
-                Icons.info_outline,
-                color: Colors.white.withOpacity(0.7),
+                icon,
+                color: iconColor,
                 size: 20,
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  viewModel.currentInstruction.isNotEmpty
-                      ? viewModel.currentInstruction
-                      : 'Nhấn nút ghi âm để bắt đầu trả lời câu hỏi',
+                  instruction,
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.7),
+                    color: viewModel.isRecording
+                        ? Colors.red.shade300
+                        : Colors.white.withOpacity(0.7),
                     fontSize: 14,
+                    fontWeight: viewModel.isRecording
+                        ? FontWeight.w600
+                        : FontWeight.normal,
                   ),
                 ),
               ),
@@ -363,11 +549,24 @@ class ModernPracticeScreen extends StatelessWidget {
   }
 
   void _previousQuestion(PracticeViewModel viewModel) {
-    // Implementation for going to previous question
+    final practiceController = Get.find<PracticeController>();
+    if (practiceController.currentQuestionIndex > 0) {
+      practiceController.moveToQuestion(
+        practiceController.currentQuestionIndex - 1,
+      );
+    }
   }
 
   void _nextQuestion(PracticeViewModel viewModel) {
-    // Implementation for going to next question
+    final practiceController = Get.find<PracticeController>();
+    final session = practiceController.currentSession;
+    if (session != null &&
+        practiceController.currentQuestionIndex <
+            session.questions.length - 1) {
+      practiceController.moveToQuestion(
+        practiceController.currentQuestionIndex + 1,
+      );
+    }
   }
 
   void _showExitDialog(PracticeViewModel viewModel) {

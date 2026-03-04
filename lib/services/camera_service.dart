@@ -1,21 +1,30 @@
+import 'dart:async';
 import 'package:camera/camera.dart';
-import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
-import 'package:flutter/material.dart';
 import '../models/practice_session.dart';
+// import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart'; // TẮT
+// import '../models/behavior_result.dart'; // TẮT
+// import '../services/ai_behavior_detector_service.dart'; // TẮT
 
 class CameraService {
   CameraController? _controller;
-  final FaceDetector _faceDetector = FaceDetector(
-    options: FaceDetectorOptions(
-      enableClassification: true,
-      enableLandmarks: true,
-      enableContours: true,
-      enableTracking: true,
-    ),
-  );
+
+  // TẮT FACE DETECTION ĐỂ TRÁNH CRASH
+  // final FaceDetector _faceDetector = FaceDetector(
+  //   options: FaceDetectorOptions(
+  //     enableClassification: true,
+  //     enableLandmarks: true,
+  //     enableContours: true,
+  //     enableTracking: true,
+  //   ),
+  // );
+
+  // TẮT AI BEHAVIOR DETECTOR ĐỂ TRÁNH CRASH
+  // final AIBehaviorDetectorService _behaviorDetector =
+  //     AIBehaviorDetectorService();
 
   bool _isInitialized = false;
   bool _isDetecting = false;
+  // bool _isBehaviorDetectionEnabled = false; // TẮT TẠM để tránh crash
 
   // Face analysis data
   List<EmotionData> _emotionHistory = [];
@@ -24,6 +33,13 @@ class CameraService {
   bool get isInitialized => _isInitialized;
   CameraController? get controller => _controller;
   List<EmotionData> get emotionHistory => _emotionHistory;
+
+  // TẮT BEHAVIOR DETECTION GETTERS
+  // AIBehaviorDetectorService get behaviorDetector => _behaviorDetector;
+  // Stream<BehaviorResult> get behaviorStream => _behaviorDetector.behaviorStream;
+  // BehaviorResult? get lastBehavior => _behaviorDetector.lastBehavior;
+  // BehaviorStatistics get behaviorStatistics =>
+  //     _behaviorDetector.getStatistics();
 
   // Initialize camera
   Future<bool> initialize() async {
@@ -83,17 +99,24 @@ class CameraService {
     return null;
   }
 
-  // Process camera image for face detection
+  // Process camera image for face detection and behavior analysis
   void _processCameraImage(CameraImage image) async {
     if (_isDetecting) return;
     _isDetecting = true;
 
     try {
-      final inputImage = _convertCameraImage(image);
-      if (inputImage != null) {
-        final faces = await _faceDetector.processImage(inputImage);
-        _analyzeFaces(faces);
-      }
+      // TẮT TẤT CẢ FACE DETECTION ĐỂ TRÁNH CRASH
+      // // Process for behavior detection using AI
+      // if (_isBehaviorDetectionEnabled) {
+      //   await _behaviorDetector.detectBehavior(image);
+      // }
+
+      // // Continue with emotion analysis
+      // final inputImage = _convertCameraImage(image);
+      // if (inputImage != null) {
+      //   final faces = await _faceDetector.processImage(inputImage);
+      //   _analyzeFaces(faces);
+      // }
     } catch (e) {
       print('Error processing camera image: $e');
     }
@@ -101,161 +124,161 @@ class CameraService {
     _isDetecting = false;
   }
 
-  // Convert camera image to InputImage for ML Kit
-  InputImage? _convertCameraImage(CameraImage image) {
-    try {
-      final camera = _controller!.description;
-      InputImageRotation? rotation;
-
-      if (camera.lensDirection == CameraLensDirection.front) {
-        rotation = InputImageRotation.rotation270deg;
-      } else {
-        rotation = InputImageRotation.rotation90deg;
-      }
-
-      final format = InputImageFormat.nv21;
-
-      final plane = image.planes.first;
-
-      return InputImage.fromBytes(
-        bytes: plane.bytes,
-        metadata: InputImageMetadata(
-          size: Size(image.width.toDouble(), image.height.toDouble()),
-          rotation: rotation,
-          format: format,
-          bytesPerRow: plane.bytesPerRow,
-        ),
-      );
-    } catch (e) {
-      print('Error converting camera image: $e');
-      return null;
-    }
-  }
-
-  // Analyze detected faces
-  void _analyzeFaces(List<Face> faces) {
-    if (faces.isEmpty) {
-      // No face detected
-      _recordEmotionData(null);
-      return;
-    }
-
-    // Use the first (primary) face
-    Face face = faces.first;
-    _recordEmotionData(face);
-  }
-
-  // Record emotion data
-  void _recordEmotionData(Face? face) {
-    DateTime now = DateTime.now();
-
-    if (face == null) {
-      // No face detected
-      EmotionData emotionData = EmotionData(
-        timestamp: now,
-        happiness: 0.0,
-        confidence: 0.0,
-        neutral: 1.0,
-        nervous: 0.0,
-        lookingAtCamera: false,
-      );
-      _emotionHistory.add(emotionData);
-      return;
-    }
-
-    // Extract emotion probabilities
-    double happiness = 0.0;
-    double confidence = 0.5; // Default neutral confidence
-    double neutral = 0.5;
-    double nervous = 0.0;
-
-    // Analyze facial expressions
-    if (face.smilingProbability != null) {
-      happiness = face.smilingProbability!;
-      neutral = 1.0 - happiness;
-    }
-
-    // Estimate confidence based on facial features
-    confidence = _estimateConfidence(face);
-    nervous = _estimateNervousness(face);
-
-    // Check eye contact (looking at camera)
-    bool lookingAtCamera = _isLookingAtCamera(face);
-
-    EmotionData emotionData = EmotionData(
-      timestamp: now,
-      happiness: happiness,
-      confidence: confidence,
-      neutral: neutral,
-      nervous: nervous,
-      lookingAtCamera: lookingAtCamera,
-    );
-
-    _emotionHistory.add(emotionData);
-  }
-
-  // Estimate confidence based on facial features
-  double _estimateConfidence(Face face) {
-    double confidence = 0.5; // Base confidence
-
-    // Head pose analysis
-    if (face.headEulerAngleY != null && face.headEulerAngleX != null) {
-      double headStability =
-          1.0 -
-          (face.headEulerAngleY!.abs() + face.headEulerAngleX!.abs()) / 90.0;
-      confidence += headStability.clamp(0.0, 0.3);
-    }
-
-    // Eye openness (if available through landmarks)
-    if (face.leftEyeOpenProbability != null &&
-        face.rightEyeOpenProbability != null) {
-      double eyeOpenness =
-          (face.leftEyeOpenProbability! + face.rightEyeOpenProbability!) / 2.0;
-      if (eyeOpenness > 0.5) {
-        confidence += 0.2;
-      }
-    }
-
-    return confidence.clamp(0.0, 1.0);
-  }
-
-  // Estimate nervousness based on facial features
-  double _estimateNervousness(Face face) {
-    double nervousness = 0.0;
-
-    // Rapid head movements or extreme angles suggest nervousness
-    if (face.headEulerAngleY != null && face.headEulerAngleX != null) {
-      double headMovement =
-          (face.headEulerAngleY!.abs() + face.headEulerAngleX!.abs()) / 90.0;
-      nervousness = headMovement.clamp(0.0, 0.8);
-    }
-
-    // Blinking patterns (if detectable)
-    if (face.leftEyeOpenProbability != null &&
-        face.rightEyeOpenProbability != null) {
-      double eyeOpenness =
-          (face.leftEyeOpenProbability! + face.rightEyeOpenProbability!) / 2.0;
-      if (eyeOpenness < 0.3) {
-        nervousness += 0.2; // Frequent blinking
-      }
-    }
-
-    return nervousness.clamp(0.0, 1.0);
-  }
-
-  // Check if person is looking at camera
-  bool _isLookingAtCamera(Face face) {
-    // Use head pose to determine eye contact
-    if (face.headEulerAngleY != null && face.headEulerAngleX != null) {
-      double yAngle = face.headEulerAngleY!.abs();
-      double xAngle = face.headEulerAngleX!.abs();
-
-      // Consider looking at camera if head is relatively straight
-      return yAngle < 15.0 && xAngle < 20.0;
-    }
-
-    return false;
-  }
+  // TẮT TẤT CẢ CÁC METHOD FACE DETECTION ĐỂ TRÁNH LỖIBIÊN DỊCH
+  // // Convert camera image to InputImage for ML Kit
+  // InputImage? _convertCameraImage(CameraImage image) {
+  //   try {
+  //     final camera = _controller!.description;
+  //     InputImageRotation? rotation;
+  //
+  //     if (camera.lensDirection == CameraLensDirection.front) {
+  //       rotation = InputImageRotation.rotation270deg;
+  //     } else {
+  //       rotation = InputImageRotation.rotation90deg;
+  //     }
+  //
+  //     final format = InputImageFormat.nv21;
+  //
+  //     final plane = image.planes.first;
+  //
+  //     return InputImage.fromBytes(
+  //       bytes: plane.bytes,
+  //       metadata: InputImageMetadata(
+  //         size: Size(image.width.toDouble(), image.height.toDouble()),
+  //         rotation: rotation,
+  //         format: format,
+  //         bytesPerRow: plane.bytesPerRow,
+  //       ),
+  //     );
+  //   } catch (e) {
+  //     print('Error converting camera image: $e');
+  //     return null;
+  //   }
+  // }
+  //
+  // // Analyze detected faces
+  // void _analyzeFaces(List<Face> faces) {
+  //   if (faces.isEmpty) {
+  //     // No face detected
+  //     _recordEmotionData(null);
+  //     return;
+  //   }
+  //
+  //   // Use the first (primary) face
+  //   Face face = faces.first;
+  //   _recordEmotionData(face);
+  // }
+  //
+  // // Record emotion data
+  // void _recordEmotionData(Face? face) {
+  //   DateTime now = DateTime.now();
+  //
+  //   if (face == null) {
+  //     // No face detected
+  //     EmotionData emotionData = EmotionData(
+  //       timestamp: now,
+  //       happiness: 0.0,
+  //       confidence: 0.0,
+  //       neutral: 1.0,
+  //       nervous: 0.0,
+  //       lookingAtCamera: false,
+  //     );
+  //     _emotionHistory.add(emotionData);
+  //     return;
+  //   }
+  //
+  //   // Extract emotion probabilities
+  //   double happiness = 0.0;
+  //   double confidence = 0.5; // Default neutral confidence
+  //   double neutral = 0.5;
+  //   double nervous = 0.0;
+  //
+  //   // Analyze facial expressions
+  //   if (face.smilingProbability != null) {
+  //     happiness = face.smilingProbability!;
+  //     neutral = 1.0 - happiness;
+  //   }
+  //
+  //   // Estimate confidence based on facial features
+  //   confidence = _estimateConfidence(face);
+  //   nervous = _estimateNervousness(face);
+  //
+  //   // Check eye contact (looking at camera)
+  //   bool lookingAtCamera = _isLookingAtCamera(face);
+  //
+  //   EmotionData emotionData = EmotionData(
+  //     timestamp: now,
+  //     happiness: happiness,
+  //     confidence: confidence,
+  //     neutral: neutral,
+  //     nervous: nervous,
+  //     lookingAtCamera: lookingAtCamera,
+  //   );
+  //
+  //   _emotionHistory.add(emotionData);
+  // }
+  //
+  // // Estimate confidence based on facial features
+  // double _estimateConfidence(Face face) {
+  //   double confidence = 0.5; // Base confidence
+  //
+  //   // Head pose analysis
+  //   if (face.headEulerAngleY != null && face.headEulerAngleX != null) {
+  //     double headStability = 1.0 -
+  //         (face.headEulerAngleY!.abs() + face.headEulerAngleX!.abs()) / 90.0;
+  //     confidence += headStability.clamp(0.0, 0.3);
+  //   }
+  //
+  //   // Eye openness (if available through landmarks)
+  //   if (face.leftEyeOpenProbability != null &&
+  //       face.rightEyeOpenProbability != null) {
+  //     double eyeOpenness =
+  //         (face.leftEyeOpenProbability! + face.rightEyeOpenProbability!) / 2.0;
+  //     if (eyeOpenness > 0.5) {
+  //       confidence += 0.2;
+  //     }
+  //   }
+  //
+  //   return confidence.clamp(0.0, 1.0);
+  // }
+  //
+  // // Estimate nervousness based on facial features
+  // double _estimateNervousness(Face face) {
+  //   double nervousness = 0.0;
+  //
+  //   // Rapid head movements or extreme angles suggest nervousness
+  //   if (face.headEulerAngleY != null && face.headEulerAngleX != null) {
+  //     double headMovement =
+  //         (face.headEulerAngleY!.abs() + face.headEulerAngleX!.abs()) / 90.0;
+  //     nervousness = headMovement.clamp(0.0, 0.8);
+  //   }
+  //
+  //   // Blinking patterns (if detectable)
+  //   if (face.leftEyeOpenProbability != null &&
+  //       face.rightEyeOpenProbability != null) {
+  //     double eyeOpenness =
+  //         (face.leftEyeOpenProbability! + face.rightEyeOpenProbability!) / 2.0;
+  //     if (eyeOpenness < 0.3) {
+  //       nervousness += 0.2; // Frequent blinking
+  //     }
+  //   }
+  //
+  //   return nervousness.clamp(0.0, 1.0);
+  // }
+  //
+  // // Check if person is looking at camera
+  // bool _isLookingAtCamera(Face face) {
+  //   // Use head pose to determine eye contact
+  //   if (face.headEulerAngleY != null && face.headEulerAngleX != null) {
+  //     double yAngle = face.headEulerAngleY!.abs();
+  //     double xAngle = face.headEulerAngleX!.abs();
+  //
+  //     // Consider looking at camera if head is relatively straight
+  //     return yAngle < 15.0 && xAngle < 20.0;
+  //   }
+  //
+  //   return false;
+  // }
 
   // Get real-time feedback
   Map<String, dynamic> getRealTimeFeedback() {
@@ -284,19 +307,18 @@ class CameraService {
     }
 
     // Calculate averages
-    double avgEyeContact =
-        recentEmotions
+    double avgEyeContact = recentEmotions
             .map((e) => e.lookingAtCamera ? 1.0 : 0.0)
             .reduce((a, b) => a + b) /
         recentEmotions.length;
 
     double avgHappiness =
         recentEmotions.map((e) => e.happiness).reduce((a, b) => a + b) /
-        recentEmotions.length;
+            recentEmotions.length;
 
     double avgConfidence =
         recentEmotions.map((e) => e.confidence).reduce((a, b) => a + b) /
-        recentEmotions.length;
+            recentEmotions.length;
 
     // Generate feedback
     String eyeContactFeedback = avgEyeContact > 0.6
@@ -310,8 +332,8 @@ class CameraService {
     String confidenceFeedback = avgConfidence > 0.6
         ? 'You appear confident!'
         : avgConfidence > 0.4
-        ? 'Good posture, keep it up'
-        : 'Straighten up and project confidence';
+            ? 'Good posture, keep it up'
+            : 'Straighten up and project confidence';
 
     return {
       'eyeContact': eyeContactFeedback,
@@ -332,19 +354,18 @@ class CameraService {
       };
     }
 
-    double avgEyeContact =
-        _emotionHistory
+    double avgEyeContact = _emotionHistory
             .map((e) => e.lookingAtCamera ? 1.0 : 0.0)
             .reduce((a, b) => a + b) /
         _emotionHistory.length;
 
     double avgHappiness =
         _emotionHistory.map((e) => e.happiness).reduce((a, b) => a + b) /
-        _emotionHistory.length;
+            _emotionHistory.length;
 
     double avgConfidence =
         _emotionHistory.map((e) => e.confidence).reduce((a, b) => a + b) /
-        _emotionHistory.length;
+            _emotionHistory.length;
 
     Duration totalDuration = _analysisStartTime != null
         ? DateTime.now().difference(_analysisStartTime!)
@@ -364,11 +385,21 @@ class CameraService {
   void clearHistory() {
     _emotionHistory.clear();
     _analysisStartTime = null;
+    // _behaviorDetector.reset(); // TẮT
+  }
+
+  // Enable/disable behavior detection
+  void setBehaviorDetection(bool enabled) {
+    // _isBehaviorDetectionEnabled = enabled; // TẮT
+    // if (!enabled) {
+    //   _behaviorDetector.reset(); // TẮT
+    // }
   }
 
   // Dispose resources
   void dispose() {
     _controller?.dispose();
-    _faceDetector.close();
+    // _faceDetector.close(); // TẮT
+    // _behaviorDetector.dispose(); // TẮT
   }
 }

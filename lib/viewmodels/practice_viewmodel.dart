@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
@@ -5,6 +6,7 @@ import '../viewmodels/base_viewmodel.dart';
 import '../controllers/practice_controller.dart';
 import '../models/practice_session.dart';
 import '../models/user_statistics.dart';
+import '../widgets/questions_preview_dialog.dart';
 
 class PracticeViewModel extends BaseViewModel {
   // Use lazy initialization with better error handling
@@ -184,33 +186,95 @@ class PracticeViewModel extends BaseViewModel {
     isFileValid.value = false;
   }
 
-  // Start practice session
+  // Additional reactive states for PDF processing
+  final RxBool _isPdfProcessing = false.obs;
+  final RxBool _isGeneratingQuestions = false.obs;
+  final RxString _processingStep = ''.obs;
+  final RxDouble _processingProgress = 0.0.obs;
+
+  bool get isPdfProcessing => _isPdfProcessing.value;
+  bool get isGeneratingQuestions => _isGeneratingQuestions.value;
+  String get processingStep => _processingStep.value;
+  double get processingProgress => _processingProgress.value;
+
+  // Start practice session with full PDF + AI integration
   Future<void> startPractice() async {
-    if (!_validateSetup()) return;
+    if (_selectedFile.value == null) {
+      setError('Vui lòng chọn file PDF');
+      return;
+    }
 
     try {
       setBusy();
-      Get.toNamed('/practice-session');
+      _isPdfProcessing.value = true;
+      _processingProgress.value = 0.0;
+
+      // Step 1: Validating PDF
+      _processingStep.value = 'Đang kiểm tra file PDF...';
+      _processingProgress.value = 0.2;
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Step 2: Extracting text from PDF
+      _processingStep.value = 'Đang trích xuất nội dung từ PDF...';
+      _processingProgress.value = 0.4;
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Step 3: Generate questions with AI
+      _processingStep.value = 'Đang sinh câu hỏi bằng AI...';
+      _isGeneratingQuestions.value = true;
+      _processingProgress.value = 0.6;
+
+      // Call controller to create session (this handles PDF + AI)
+      await _practiceController.createSession(
+        mode: _selectedMode.value,
+        pdfFile: _selectedFile.value!,
+      );
+
+      _processingProgress.value = 1.0;
+      _processingStep.value = 'Hoàn tất! Đang chuyển trang...';
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Show questions preview dialog
+      final session = _practiceController.currentSession;
+      if (session != null && session.questions.isNotEmpty) {
+        await Get.dialog(
+          QuestionsPreviewDialog(
+            questions: session.questions,
+            mode: _selectedMode.value.name,
+            onStart: () {
+              // This will be called when user clicks "Bắt đầu luyện tập"
+              Get.toNamed('/practice-session');
+            },
+          ),
+          barrierDismissible: false,
+        );
+      } else {
+        // Fallback if no questions
+        Get.snackbar(
+          'Thành công',
+          'Đã tạo phiên luyện tập',
+          backgroundColor: const Color(0xFF10B981),
+          colorText: Colors.white,
+          duration: const Duration(seconds: 2),
+        );
+        Get.toNamed('/practice-session');
+      }
     } catch (e) {
+      _processingStep.value = '';
       setError('Không thể bắt đầu phiên luyện tập: $e');
+      Get.snackbar(
+        'Lỗi',
+        e.toString(),
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        duration: const Duration(seconds: 3),
+      );
     } finally {
+      _isPdfProcessing.value = false;
+      _isGeneratingQuestions.value = false;
+      _processingProgress.value = 0.0;
       setIdle();
     }
-  }
-
-  bool _validateSetup() {
-    if (selectedModeString.value == 'upload' &&
-        selectedFileSetup.value == null) {
-      setError('Vui lòng chọn file để upload');
-      return false;
-    }
-
-    if (selectedModeString.value == 'upload' && !isFileValid.value) {
-      setError('File được chọn không hợp lệ');
-      return false;
-    }
-
-    return true;
   }
 
   // Validation
@@ -290,6 +354,15 @@ class PracticeViewModel extends BaseViewModel {
       case PracticeMode.interview:
         return 'Luyện tập Phỏng vấn';
     }
+  }
+
+  // Cancel processing (nếu user muốn hủy)
+  void cancelProcessing() {
+    _isPdfProcessing.value = false;
+    _isGeneratingQuestions.value = false;
+    _processingStep.value = '';
+    _processingProgress.value = 0.0;
+    setIdle();
   }
 
   // Start session

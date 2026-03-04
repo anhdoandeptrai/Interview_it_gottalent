@@ -229,25 +229,27 @@ class PracticeProvider extends ChangeNotifier {
             questionCount: 5,
           )
               .timeout(
-            const Duration(seconds: 30),
+            const Duration(seconds: 45),
             onTimeout: () {
-              print('AI service timeout, using fallback questions');
-              return _generateFallbackQuestions(mode);
+              print('❌ AI service timeout after 45 seconds');
+              throw Exception(
+                  'Gemini AI không phản hồi. Vui lòng kiểm tra kết nối internet và thử lại.');
             },
           );
         } else {
-          _questions = _generateFallbackQuestions(mode);
+          throw Exception(
+              'AI service chưa được khởi tạo. Vui lòng khởi động lại ứng dụng.');
         }
       } catch (e) {
-        print('AI service error: $e');
-        // Fallback questions nếu AI service fail
-        _questions = _generateFallbackQuestions(mode);
+        print('❌ AI service error: $e');
+        // Throw error thay vì dùng fallback
+        throw Exception('Không thể tạo câu hỏi từ AI: ${e.toString()}');
       }
 
       if (_questions.isEmpty) {
-        // Tạo câu hỏi mặc định nếu AI service không hoạt động
-        print('No questions generated, using fallback');
-        _questions = _generateFallbackQuestions(mode);
+        print('❌ No questions generated from AI');
+        throw Exception(
+            'AI không thể tạo câu hỏi từ nội dung PDF. Vui lòng thử file PDF khác.');
       }
 
       print('Generated ${_questions.length} questions');
@@ -306,22 +308,16 @@ class PracticeProvider extends ChangeNotifier {
       } else if (e.toString().contains('Failed to generate questions')) {
         errorMessage += 'AI service unavailable. Please try again later';
       } else if (e.toString().contains('Invalid practice mode')) {
-        errorMessage += 'Invalid practice mode selected';
-        // Force fallback questions for invalid mode
-        _questions = _generateFallbackQuestions(PracticeMode.interview);
-        print('Using fallback questions due to invalid mode');
+        errorMessage += 'Chế độ luyện tập không hợp lệ';
+      } else if (e.toString().contains('Gemini AI không phản hồi')) {
+        errorMessage += 'AI không phản hồi. Vui lòng kiểm tra kết nối internet';
+      } else if (e.toString().contains('Không thể tạo câu hỏi từ AI')) {
+        errorMessage += 'Không thể tạo câu hỏi. Vui lòng thử file PDF khác';
       } else {
         errorMessage += e.toString();
       }
 
       _setError(errorMessage);
-
-      // Nếu có ít nhất fallback questions, vẫn có thể tiếp tục
-      if (_questions.isNotEmpty && _currentSession != null) {
-        print('Session created with fallback questions despite error');
-        return true;
-      }
-
       return false;
     } finally {
       _setLoading(false);
@@ -807,27 +803,6 @@ class PracticeProvider extends ChangeNotifier {
     SchedulerBinding.instance.addPostFrameCallback((_) {
       notifyListeners();
     });
-  }
-
-  // Tạo câu hỏi fallback khi AI service fail
-  List<String> _generateFallbackQuestions(PracticeMode mode) {
-    if (mode == PracticeMode.interview) {
-      return [
-        'Hãy giới thiệu về bản thân và kinh nghiệm làm việc của bạn.',
-        'Điểm mạnh và điểm yếu của bạn là gì?',
-        'Tại sao bạn muốn làm việc tại công ty này?',
-        'Bạn xử lý áp lực công việc như thế nào?',
-        'Mục tiêu nghề nghiệp của bạn trong 3-5 năm tới là gì?',
-      ];
-    } else {
-      return [
-        'Hãy giới thiệu chủ đề chính của bài thuyết trình.',
-        'Những điểm quan trọng nhất mà bạn muốn truyền tải là gì?',
-        'Bạn có thể đưa ra ví dụ cụ thể để minh họa không?',
-        'Thách thức lớn nhất trong chủ đề này là gì?',
-        'Bạn có đề xuất giải pháp nào cho vấn đề được nêu ra?',
-      ];
-    }
   }
 
   @override

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import '../models/practice_session.dart';
 
@@ -7,7 +8,8 @@ class AIService {
 
   AIService({required String geminiApiKey, String? openAIApiKey})
       : _openAIApiKey = openAIApiKey {
-    _model = GenerativeModel(model: 'gemini-pro', apiKey: geminiApiKey);
+    // Sử dụng gemini-1.5-flash (stable version - no beta/latest suffix)
+    _model = GenerativeModel(model: 'gemini-1.5-flash', apiKey: geminiApiKey);
   }
 
   // Generate questions based on PDF content and practice mode
@@ -17,21 +19,46 @@ class AIService {
     int questionCount = 5,
   }) async {
     try {
+      print(
+          '🤖 AI Service: Generating $questionCount questions for ${mode.name} mode');
+
+      // Limit content length to avoid API limits
+      String processedContent = pdfContent;
+      if (pdfContent.length > 4000) {
+        processedContent = pdfContent.substring(0, 4000);
+        print('⚠️ Content truncated to 4000 characters for API limit');
+      }
+
       String prompt = _buildQuestionGenerationPrompt(
-        pdfContent,
+        processedContent,
         mode,
         questionCount,
       );
 
+      print('📤 Sending request to Gemini API...');
       final response = await _model.generateContent([Content.text(prompt)]);
       String responseText = response.text ?? '';
 
-      return _parseQuestionsFromResponse(responseText);
+      print('📥 Received response from Gemini API');
+      print(
+          'Response preview: ${responseText.substring(0, responseText.length > 200 ? 200 : responseText.length)}...');
+
+      final questions = _parseQuestionsFromResponse(responseText);
+
+      if (questions.isEmpty) {
+        print('❌ No questions parsed from AI response');
+        throw Exception(
+            'Gemini AI không thể tạo câu hỏi từ nội dung PDF. Vui lòng thử lại hoặc sử dụng file PDF khác.');
+      }
+
+      print('✅ Successfully generated ${questions.length} questions');
+      return questions;
     } catch (e) {
-      print('Error generating questions with Gemini: $e');
+      print('❌ Error generating questions with Gemini: $e');
 
       // Fallback to OpenAI if available
       if (_openAIApiKey != null) {
+        print('🔄 Trying fallback to OpenAI...');
         return await _generateQuestionsWithOpenAI(
           pdfContent,
           mode,
@@ -39,7 +66,9 @@ class AIService {
         );
       }
 
-      return _getFallbackQuestions(mode);
+      // Throw error - không dùng fallback nữa
+      throw Exception(
+          'Không thể tạo câu hỏi từ Gemini AI: ${e.toString()}. Vui lòng kiểm tra kết nối internet và thử lại.');
     }
   }
 
@@ -99,33 +128,52 @@ class AIService {
     return '''
 Bạn là một chuyên gia tuyển dụng và huấn luyện kỹ năng mềm hàng đầu tại Việt Nam.
 
-Dựa trên nội dung sau đây, hãy tạo $count câu hỏi chất lượng cao cho buổi luyện tập $modeDescription bằng tiếng Việt:
+NHIỆM VỤ: Dựa trên nội dung sau đây, hãy tạo $count câu hỏi chất lượng cao cho buổi luyện tập $modeDescription bằng tiếng Việt.
 
-Nội dung: $content
+NỘI DUNG:
+$content
 
-Yêu cầu:
-1. Câu hỏi phải bằng tiếng Việt hoàn toàn
-2. Phù hợp với văn hóa làm việc tại Việt Nam
-3. Tập trung vào kỹ năng và kinh nghiệm thực tế
-4. Từng câu hỏi trên một dòng riêng biệt
-5. Không đánh số thứ tự
-6. Câu hỏi phải rõ ràng và dễ hiểu
+YÊU CẦU BẮT BUỘC:
+1. Tất cả câu hỏi phải bằng tiếng Việt 100%
+2. Câu hỏi phải liên quan trực tiếp đến nội dung được cung cấp
+3. Mỗi câu hỏi phải rõ ràng, cụ thể và dễ hiểu
+4. Độ dài mỗi câu hỏi: 10-30 từ
+5. Tránh câu hỏi quá chung chung hoặc quá đơn giản
 
 ${mode == PracticeMode.interview ? '''
-Đối với phỏng vấn, hãy tập trung vào:
-- Kinh nghiệm và kỹ năng chuyên môn
-- Tình huống xử lý công việc
-- Động lực và mục tiêu nghề nghiệp
-- Khả năng làm việc nhóm
-- Điểm mạnh và cần cải thiện''' : '''
-Đối với thuyết trình, hãy tập trung vào:
-- Giải thích nội dung chính
-- Trình bày ý tưởng sáng tạo
-- Phân tích và đánh giá
-- Đưa ra kết luận và khuyến nghị
-- Tương tác với khán giả'''}
+HƯỚNG DẪN CHO PHỎNG VẤN:
+- Tập trung vào kinh nghiệm và kỹ năng trong nội dung
+- Hỏi về cách xử lý tình huống thực tế
+- Đánh giá khả năng áp dụng kiến thức vào công việc
+- Khai thác điểm mạnh và tiềm năng phát triển
+- Kiểm tra sự hiểu biết về lĩnh vực chuyên môn
 
-Trả lời chỉ gồm $count câu hỏi, mỗi câu một dòng:''';
+VÍ DỤ CÂU HỎI TỐT:
+- "Bạn có thể chia sẻ về [kỹ năng cụ thể] được đề cập trong CV không?"
+- "Trong dự án [tên dự án], bạn đã đối mặt với thách thức nào và giải quyết như thế nào?"
+- "Với kinh nghiệm về [lĩnh vực], bạn sẽ đóng góp gì cho vị trí này?"''' : '''
+HƯỚNG DẪN CHO THUYẾT TRÌNH:
+- Yêu cầu giải thích các khái niệm chính trong tài liệu
+- Hỏi về ứng dụng thực tế của nội dung
+- Kiểm tra khả năng truyền đạt và phân tích
+- Đánh giá sự hiểu biết sâu về chủ đề
+- Khuyến khích thảo luận và đưa ra quan điểm
+
+VÍ DỤ CÂU HỎI TỐT:
+- "Bạn có thể giải thích về [khái niệm chính] được trình bày không?"
+- "Ứng dụng thực tế của [nội dung] trong công việc là gì?"
+- "So sánh [điểm A] và [điểm B], bạn nhận thấy điểm nào quan trọng hơn?"'''}
+
+ĐỊNH DẠNG TRẢ LỜI:
+Trả về ĐÚNG $count câu hỏi, mỗi câu trên một dòng riêng, đánh số thứ tự:
+
+1. [Câu hỏi thứ nhất]
+2. [Câu hỏi thứ hai]
+3. [Câu hỏi thứ ba]
+...
+
+CHÚ Ý: KHÔNG thêm giải thích, ghi chú hay văn bản nào khác ngoài $count câu hỏi được đánh số.
+''';
   }
 
   String _buildEvaluationPrompt(
@@ -220,29 +268,82 @@ Vui lòng trả lời theo định dạng JSON:
   List<String> _parseQuestionsFromResponse(String response) {
     List<String> questions = [];
 
-    // Split by lines and extract numbered questions
-    List<String> lines = response.split('\n');
+    // Try to parse JSON format first (if AI returns structured data)
+    try {
+      // Remove markdown code blocks if present
+      String cleanResponse =
+          response.replaceAll('```json', '').replaceAll('```', '').trim();
 
-    for (String line in lines) {
-      String trimmed = line.trim();
-      if (trimmed.isNotEmpty &&
-          (RegExp(r'^\d+\.').hasMatch(trimmed) ||
-              RegExp(r'^\d+\)').hasMatch(trimmed) ||
-              trimmed.startsWith('Q:') ||
-              trimmed.contains('?'))) {
-        // Clean up the question
-        String question = trimmed
-            .replaceFirst(RegExp(r'^\d+[\.\)]\s*'), '')
-            .replaceFirst(RegExp(r'^Q:\s*'), '')
-            .trim();
+      // Parse different formats
+      if (cleanResponse.startsWith('[') && cleanResponse.endsWith(']')) {
+        // JSON array format
+        final decoded = jsonDecode(cleanResponse) as List;
+        questions = decoded.map((q) => q.toString()).toList();
+      }
+    } catch (e) {
+      // Not JSON, continue with text parsing
+    }
 
-        if (question.isNotEmpty && question.length > 10) {
-          questions.add(question);
+    // If JSON parsing failed or returned empty, try text parsing
+    if (questions.isEmpty) {
+      List<String> lines = response.split('\n');
+
+      for (String line in lines) {
+        String trimmed = line.trim();
+
+        // Skip empty lines and headers
+        if (trimmed.isEmpty ||
+            trimmed.toLowerCase().contains('câu hỏi') ||
+            trimmed.toLowerCase().startsWith('questions:')) {
+          continue;
+        }
+
+        // Check if line looks like a question
+        bool looksLikeQuestion = false;
+
+        // Pattern 1: Numbered questions (1. , 1) , Question 1:)
+        if (RegExp(r'^\d+[\.\):]').hasMatch(trimmed)) {
+          looksLikeQuestion = true;
+          trimmed = trimmed.replaceFirst(RegExp(r'^\d+[\.\):]\s*'), '');
+        }
+
+        // Pattern 2: Bullet points (-, *, •)
+        if (RegExp(r'^[\-\*•]').hasMatch(trimmed)) {
+          looksLikeQuestion = true;
+          trimmed = trimmed.replaceFirst(RegExp(r'^[\-\*•]\s*'), '');
+        }
+
+        // Pattern 3: Question prefix (Q:, Question:)
+        if (RegExp(r'^(Q|Question|Câu hỏi)\s*[:]\s*', caseSensitive: false)
+            .hasMatch(trimmed)) {
+          looksLikeQuestion = true;
+          trimmed = trimmed.replaceFirst(
+              RegExp(r'^(Q|Question|Câu hỏi)\s*[:]\s*', caseSensitive: false),
+              '');
+        }
+
+        // Pattern 4: Contains question mark
+        if (trimmed.contains('?')) {
+          looksLikeQuestion = true;
+        }
+
+        // Clean up and validate
+        trimmed = trimmed.trim();
+
+        if (looksLikeQuestion && trimmed.isNotEmpty && trimmed.length > 10) {
+          // Ensure question ends with proper punctuation
+          if (!trimmed.endsWith('?') && !trimmed.endsWith('.')) {
+            trimmed += '?';
+          }
+          questions.add(trimmed);
         }
       }
     }
 
-    return questions.take(10).toList(); // Limit to 10 questions max
+    print('📋 Parsed ${questions.length} questions from response');
+
+    // Limit to requested count + 2 (for quality selection)
+    return questions.take(7).toList();
   }
 
   Map<String, dynamic> _parseEvaluationFromResponse(String response) {
@@ -341,8 +442,9 @@ Vui lòng trả lời theo định dạng JSON:
     PracticeMode mode,
     int count,
   ) async {
-    // Implement OpenAI API call if needed
-    return _getFallbackQuestions(mode);
+    // Throw error - OpenAI not implemented
+    throw Exception(
+        'OpenAI integration chưa được triển khai. Chỉ hỗ trợ Gemini AI.');
   }
 
   Future<Map<String, dynamic>> _evaluateAnswerWithOpenAI(
@@ -354,26 +456,7 @@ Vui lòng trả lời theo định dạng JSON:
     return _getFallbackEvaluation();
   }
 
-  // Fallback methods
-  List<String> _getFallbackQuestions(PracticeMode mode) {
-    if (mode == PracticeMode.interview) {
-      return [
-        "Tell me about yourself and your background.",
-        "What are your greatest strengths?",
-        "Describe a challenging situation you faced and how you handled it.",
-        "Where do you see yourself in 5 years?",
-        "Why are you interested in this position?",
-      ];
-    } else {
-      return [
-        "What is the main topic of your presentation?",
-        "What are the key points you want to convey?",
-        "How would you engage your audience?",
-        "What questions might your audience ask?",
-        "How would you conclude your presentation?",
-      ];
-    }
-  }
+  // Fallback methods removed - all questions must come from Gemini AI
 
   Map<String, dynamic> _getFallbackEvaluation() {
     return {
