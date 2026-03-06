@@ -7,7 +7,7 @@ import '../models/practice_session.dart';
 void main() async {
   print('🧪 Testing Question Generator with Gemini AI\n');
 
-  const geminiApiKey = 'AIzaSyDydED8YiFYXoW9Qq3woSlGaqC3ikrWhMs';
+  const geminiApiKey = 'AIzaSyDWJtGE9RJ1RzvqV-zNAeebZsZu7UOCwsk';
   final aiService = AIService(geminiApiKey: geminiApiKey);
 
   // Sample PDF content for testing

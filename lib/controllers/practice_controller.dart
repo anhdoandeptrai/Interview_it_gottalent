@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'dart:io';
+import 'dart:async';
 import '../models/practice_session.dart';
 import '../services/local_firebase_service.dart';
 import '../services/sync_service.dart';
@@ -8,6 +9,8 @@ import '../services/pdf_service.dart';
 import '../services/ai_service.dart';
 import '../services/speech_service.dart';
 import '../services/camera_service.dart';
+import '../services/ai_behavior_detector_service.dart';
+import '../models/behavior_result.dart';
 import '../controllers/auth_controller.dart';
 import '../routes/app_routes.dart';
 
@@ -19,6 +22,7 @@ class PracticeController extends GetxController {
   final PdfService _pdfService = PdfService();
   final SpeechService _speechService = SpeechService();
   final CameraService _cameraService = CameraService();
+  final AIBehaviorDetectorService _behaviorDetector = AIBehaviorDetectorService();
   late final AIService _aiService;
 
   // Observable variables
@@ -65,7 +69,7 @@ class PracticeController extends GetxController {
   }
 
   void _initializeAI() {
-    const geminiApiKey = 'AIzaSyDydED8YiFYXoW9Qq3woSlGaqC3ikrWhMs';
+    const geminiApiKey = 'AIzaSyDWJtGE9RJ1RzvqV-zNAeebZsZu7UOCwsk';
     _aiService = AIService(geminiApiKey: geminiApiKey);
   }
 
@@ -240,26 +244,75 @@ class PracticeController extends GetxController {
     }
   }
 
+  // Biến lưu tạm câu trả lời đang ghi
+  String _currentAnswerText = '';
+  DateTime? _answerStartTime;
+  final List<BehaviorResult> _currentBehaviors = [];
+  Timer? _behaviorDetectionTimer;
+
   // Start recording answer
   Future<void> startAnswer() async {
     try {
       _isRecording.value = true;
+      _currentAnswerText = '';
+      _answerStartTime = DateTime.now();
+      _currentBehaviors.clear();
+
+      print('🎤 Bắt đầu ghi âm câu trả lời...');
 
       await _speechService.startListening(
         onResult: (result) {
-          // Handle speech result
+          // Lưu text từ speech-to-text
+          _currentAnswerText = result;
+          print('📝 Recognized: $result');
         },
         onSoundLevel: (level) {
-          // Handle sound level
+          // Handle sound level for UI feedback
         },
       );
 
-      // Process camera emotion analysis here
-      // _cameraService.startEmotionAnalysis();
+      // Bắt đầu phân tích emotion từ camera
+      print('😊 Bắt đầu phân tích biểu cảm khuôn mặt...');
+      _startEmotionAnalysis();
     } catch (e) {
       _errorMessage.value = e.toString();
       Get.snackbar('Lỗi', e.toString());
     }
+  }
+
+  /// Bắt đầu phân tích emotion detection
+  void _startEmotionAnalysis() {
+    if (!_behaviorDetector.isInitialized) {
+      print('⚠️ Behavior detector chưa khởi tạo');
+      return;
+    }
+
+    // Phân tích behavior mỗi 500ms để capture emotion liên tục
+    _behaviorDetectionTimer = Timer.periodic(
+      const Duration(milliseconds: 500),
+      (timer) async {
+        try {
+          // Get current camera image
+          final cameraController = _cameraService.controller;
+          if (cameraController == null || !cameraController.value.isStreamingImages) {
+            return;
+          }
+
+          // Note: Cần implement stream camera images trong CameraService
+          // Hoặc có thể dùng behavior stream từ detector
+          // Hiện tại lưu behavior từ detector
+          final behavior = _behaviorDetector.lastBehavior;
+          if (behavior != null) {
+            _currentBehaviors.add(behavior);
+            print('😊 Detected: ${behavior.label} (${behavior.type.name})');
+          }
+        } catch (e) {
+          print('⚠️ Lỗi phân tích emotion: $e');
+        }
+      },
+    );
+
+    print('✅ Đã bắt đầu emotion tracking');
   }
 
   // Stop recording answer
@@ -267,12 +320,19 @@ class PracticeController extends GetxController {
     try {
       _isRecording.value = false;
 
+      print('⏹️ Dừng ghi âm...');
       await _speechService.stopListening();
-      // Process emotion data here
-      final emotionData = <EmotionData>[];
-      // final emotionData = _cameraService.stopEmotionAnalysis();
 
-      // Process and save answer
+      // Dừng emotion analysis
+      _stopEmotionAnalysis();
+
+      // Convert BehaviorResult sang EmotionData
+      final emotionData = _convertBehaviorsToEmotions(_currentBehaviors);
+      
+      print('😊 Thu thập được ${emotionData.length} emotion data points');
+
+      // Process and save answer with AI evaluation
+      print('🤖 Đang xử lý và đánh giá câu trả lời...');
       await _processAnswer(emotionData);
 
       // Move to next question
@@ -283,9 +343,242 @@ class PracticeController extends GetxController {
     }
   }
 
+  /// Dừng emotion analysis
+  void _stopEmotionAnalysis() {
+    _behaviorDetectionTimer?.cancel();
+    _behaviorDetectionTimer = null;
+    print('⏹️ Đã dừng emotion tracking');
+  }
+
+  /// Convert BehaviorResult list sang EmotionData list
+  List<EmotionData> _convertBehaviorsToEmotions(List<BehaviorResult> behaviors) {
+    if (behaviors.isEmpty) {
+      return [];
+    }
+
+    return behaviors.map((behavior) {
+      // Map behavior type sang emotion values
+      double happiness = 0.0;
+      double confidence = 0.0;
+      double neutral = 0.0;
+      double nervous = 0.0;
+      bool lookingAtCamera = true;
+
+      switch (behavior.label) {
+        case 'Đang cười':
+        case '😊':
+          happiness = 0.9;
+          confidence = 0.8;
+          lookingAtCamera = true;
+          break;
+        case 'Tập trung':
+        case '🎯':
+          confidence = 0.9;
+          neutral = 0.7;
+          lookingAtCamera = true;
+          break;
+        case 'Đang lắng nghe':
+        case '✅':
+          confidence = 0.8;
+          neutral = 0.8;
+          lookingAtCamera = true;
+          break;
+        case 'Đang nói':
+        case '🗣️':
+          confidence = 0.85;
+          neutral = 0.6;
+          lookingAtCamera = true;
+          break;
+        case 'Bối rối':
+        case '🤔':
+          nervous = 0.6;
+          confidence = 0.4;
+          neutral = 0.3;
+          lookingAtCamera = true;
+          break;
+        case 'Mất tập trung':
+        case '👀':
+          nervous = 0.5;
+          confidence = 0.3;
+          lookingAtCamera = false;
+          break;
+        case 'Cúi đầu':
+        case '📱':
+          nervous = 0.4;
+          confidence = 0.2;
+          lookingAtCamera = false;
+          break;
+        case 'Nghiêng đầu':
+        case '⚠️':
+          nervous = 0.3;
+          confidence = 0.5;
+          neutral = 0.4;
+          lookingAtCamera = true;
+          break;
+        case 'Đang ngủ':
+        case '😴':
+          nervous = 0.1;
+          confidence = 0.0;
+          lookingAtCamera = false;
+          break;
+        default:
+          neutral = 0.5;
+          confidence = 0.5;
+      }
+
+      return EmotionData(
+        timestamp: behavior.timestamp,
+        happiness: happiness,
+        confidence: confidence,
+        neutral: neutral,
+        nervous: nervous,
+        lookingAtCamera: lookingAtCamera,
+      );
+    }).toList();
+  }
+
   Future<void> _processAnswer(List<EmotionData> emotionData) async {
-    // Implementation for processing answer
-    // This would include AI evaluation, saving audio, etc.
+    if (_currentSession.value == null) return;
+
+    final currentQuestion = _currentSession.value!.questions[_currentQuestionIndex.value];
+    final answerText = _currentAnswerText.trim();
+
+    print('📊 Đánh giá câu trả lời cho: $currentQuestion');
+    print('💬 Câu trả lời: ${answerText.isNotEmpty ? answerText : "(Không có văn bản)"}');
+    print('😊 Emotion data: ${emotionData.length} data points');
+
+    // Tính toán metrics cơ bản
+    final answerDuration = _answerStartTime != null
+        ? DateTime.now().difference(_answerStartTime!)
+        : Duration.zero;
+    
+    final wordCount = answerText.split(' ').where((w) => w.isNotEmpty).length;
+    final speakingSpeed = answerDuration.inSeconds > 0
+        ? (wordCount / answerDuration.inSeconds) * 60 // words per minute
+        : 0.0;
+    
+    final clarity = answerText.isNotEmpty ? 80.0 : 0.0; // Placeholder
+    
+    // Tính eye contact ratio từ emotion data
+    final eyeContactRatio = emotionData.isNotEmpty
+        ? emotionData.where((e) => e.lookingAtCamera).length / emotionData.length * 100
+        : 70.0;
+
+    // Phân tích emotion để tạo summary cho Gemini
+    String emotionSummary = '';
+    if (emotionData.isNotEmpty) {
+      final avgConfidence = emotionData.fold<double>(0, (sum, e) => sum + e.confidence) / emotionData.length;
+      final avgHappiness = emotionData.fold<double>(0, (sum, e) => sum + e.happiness) / emotionData.length;
+      final avgNervous = emotionData.fold<double>(0, (sum, e) => sum + e.nervous) / emotionData.length;
+      final lookingAtCameraPercent = (eyeContactRatio).toStringAsFixed(0);
+
+      emotionSummary = '''
+
+📊 PHÂN TÍCH BIỂU CẢM KHUÔN MẶT:
+- Độ tự tin: ${(avgConfidence * 100).toStringAsFixed(0)}%
+- Vui vẻ/Thoải mái: ${(avgHappiness * 100).toStringAsFixed(0)}%
+- Lo lắng/Căng thẳng: ${(avgNervous * 100).toStringAsFixed(0)}%
+- Giao tiếp mắt: $lookingAtCameraPercent%
+- Tổng số lần phân tích: ${emotionData.length}
+''';
+    }
+
+    // Đánh giá bằng AI với emotion context
+    Map<String, dynamic> aiEvaluation;
+    int score = 5;
+    
+    if (answerText.isNotEmpty && answerText.length > 10) {
+      try {
+        print('🤖 Gửi câu trả lời + emotion data cho Gemini AI đánh giá...');
+        
+        // Tạo context đầy đủ cho Gemini bao gồm emotion data
+        final enhancedAnswer = answerText + emotionSummary;
+        
+        aiEvaluation = await _aiService.evaluateAnswer(
+          question: currentQuestion,
+          answer: enhancedAnswer,
+          mode: _currentSession.value!.mode,
+        );
+        score = aiEvaluation['score'] ?? 5;
+        print('✅ AI đánh giá xong - Điểm: $score/10');
+        print('   Feedback: ${aiEvaluation['overall']}');
+      } catch (e) {
+        print('⚠️ Lỗi AI đánh giá: $e');
+        aiEvaluation = {
+          'score': 5,
+          'overall': 'Không thể đánh giá do lỗi kỹ thuật',
+          'strengths': ['Đã cố gắng trả lời'],
+          'improvements': ['Thử lại sau'],
+          'suggestions': ['Kiểm tra kết nối mạng'],
+        };
+      }
+    } else {
+      print('⚠️ Câu trả lời quá ngắn hoặc rỗng');
+      aiEvaluation = {
+        'score': 2,
+        'overall': 'Câu trả lời quá ngắn hoặc không có nội dung',
+        'strengths': [],
+        'improvements': ['Trả lời đầy đủ hơn', 'Nói rõ ràng hơn'],
+        'suggestions': ['Luyện tập nói nhiều hơn', 'Chuẩn bị nội dung trước'],
+      };
+      score = 2;
+    }
+
+    // Tạo Answer object với emotion data đầy đủ
+    final answer = Answer(
+      questionId: _currentQuestionIndex.value.toString(),
+      question: currentQuestion,
+      spokenText: answerText,
+      audioUrl: '', // TODO: Save audio file and get URL
+      timestamp: DateTime.now(),
+      speakingSpeed: speakingSpeed,
+      clarity: clarity,
+      emotions: emotionData, // Lưu emotion data đầy đủ
+      eyeContactRatio: eyeContactRatio,
+      aiEvaluation: aiEvaluation['overall'] ?? '',
+      score: score,
+    );
+
+    // Thêm answer vào session
+    final updatedAnswers = List<Answer>.from(_currentSession.value!.answers)
+      ..add(answer);
+
+    _currentSession.value = PracticeSession(
+      id: _currentSession.value!.id,
+      userId: _currentSession.value!.userId,
+      mode: _currentSession.value!.mode,
+      pdfFileName: _currentSession.value!.pdfFileName,
+      pdfUrl: _currentSession.value!.pdfUrl,
+      questions: _currentSession.value!.questions,
+      answers: updatedAnswers,
+      startTime: _currentSession.value!.startTime,
+      endTime: _currentSession.value!.endTime,
+      analytics: _currentSession.value!.analytics,
+      isCompleted: _currentSession.value!.isCompleted,
+    );
+
+    // Lưu session đã cập nhật
+    await _localFirebaseService.updatePracticeSession(_currentSession.value!);
+    print('💾 Đã lưu câu trả lời với ${emotionData.length} emotion data points');
+
+    // Show feedback với emotion context
+    String emotionFeedback = '';
+    if (emotionData.isNotEmpty) {
+      final avgConfidence = emotionData.fold<double>(0, (sum, e) => sum + e.confidence) / emotionData.length;
+      if (avgConfidence >= 0.7) {
+        emotionFeedback = ' - Tự tin 👍';
+      } else if (avgConfidence < 0.5) {
+        emotionFeedback = ' - Cần tự tin hơn 💪';
+      }
+    }
+
+    Get.snackbar(
+      '✅ Đã đánh giá',
+      'Điểm: $score/10$emotionFeedback',
+      backgroundColor: score >= 7 ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+      colorText: Colors.white,
+      duration: const Duration(seconds: 3),
+    );
   }
 
   void _moveToNextQuestion() {
@@ -324,38 +617,101 @@ class PracticeController extends GetxController {
       _isSessionInProgress.value = false;
       _isRecording.value = false;
 
+      print('🏁 Kết thúc phiên luyện tập...');
+
       await _cameraService.stopPreview();
 
-      // Update session with end time
-      final updatedSession = PracticeSession(
-        id: _currentSession.value!.id,
-        userId: _currentSession.value!.userId,
-        mode: _currentSession.value!.mode,
-        pdfFileName: _currentSession.value!.pdfFileName,
-        pdfUrl: _currentSession.value!.pdfUrl,
-        questions: _currentSession.value!.questions,
-        answers: _currentSession.value!.answers,
-        startTime: _currentSession.value!.startTime,
-        endTime: DateTime.now(),
-        analytics: _calculateAnalytics(),
-        isCompleted: true,
-      );
+      // Tính toán analytics
+      final analytics = _calculateAnalytics();
 
-      _currentSession.value = updatedSession;
-      await _localFirebaseService.updatePracticeSession(updatedSession);
-
-      // Sync to Firebase for statistics
+      // Gọi AI để phân tích tổng thể session
+      print('🤖 Đang phân tích tổng thể phiên luyện tập bằng AI...');
+      Map<String, dynamic>? aiAnalysis;
+      
       try {
-        await _syncService.savePracticeSession(updatedSession);
-        print('✅ Updated session synced to Firebase');
-      } catch (e) {
-        print('⚠️ Failed to sync updated session: $e');
+        aiAnalysis = await _aiService.generateSessionAnalysis(
+          answers: _currentSession.value!.answers,
+          analytics: analytics,
+          mode: _currentSession.value!.mode,
+        );
+        print('✅ AI đã phân tích xong phiên luyện tập');
+
+        // Cập nhật analytics với insights từ AI
+        final enhancedAnalytics = SessionAnalytics(
+          averageSpeakingSpeed: analytics.averageSpeakingSpeed,
+          averageClarity: analytics.averageClarity,
+          averageEyeContactRatio: analytics.averageEyeContactRatio,
+          averageScore: analytics.averageScore,
+          totalDuration: analytics.totalDuration,
+          emotionAverages: analytics.emotionAverages,
+          strengths: (aiAnalysis['strengths'] as List?)?.cast<String>() ?? analytics.strengths,
+          weaknesses: analytics.weaknesses,
+          improvements: (aiAnalysis['improvements'] as List?)?.cast<String>() ?? analytics.improvements,
+        );
+
+        // Update session with end time and AI analysis
+        final updatedSession = PracticeSession(
+          id: _currentSession.value!.id,
+          userId: _currentSession.value!.userId,
+          mode: _currentSession.value!.mode,
+          pdfFileName: _currentSession.value!.pdfFileName,
+          pdfUrl: _currentSession.value!.pdfUrl,
+          questions: _currentSession.value!.questions,
+          answers: _currentSession.value!.answers,
+          startTime: _currentSession.value!.startTime,
+          endTime: DateTime.now(),
+          analytics: enhancedAnalytics,
+          isCompleted: true,
+        );
+
+        _currentSession.value = updatedSession;
+        _sessionAnalytics.value = enhancedAnalytics;
+        
+        await _localFirebaseService.updatePracticeSession(updatedSession);
+        print('💾 Đã lưu kết quả phiên luyện tập');
+
+        // Sync to Firebase for statistics
+        try {
+          await _syncService.savePracticeSession(updatedSession);
+          print('✅ Updated session synced to Firebase');
+        } catch (e) {
+          print('⚠️ Failed to sync updated session: $e');
+        }
+
+        Get.snackbar(
+          '🎉 Hoàn thành',
+          'Điểm trung bình: ${analytics.averageScore.toStringAsFixed(1)}/10',
+          backgroundColor: const Color(0xFF10B981),
+          colorText: Colors.white,
+          duration: const Duration(seconds: 3),
+        );
+
+        Get.offAllNamed(AppRoutes.PRACTICE_RESULT);
+      } catch (aiError) {
+        print('⚠️ Lỗi phân tích AI: $aiError');
+        
+        // Vẫn kết thúc session với analytics cơ bản
+        final updatedSession = PracticeSession(
+          id: _currentSession.value!.id,
+          userId: _currentSession.value!.userId,
+          mode: _currentSession.value!.mode,
+          pdfFileName: _currentSession.value!.pdfFileName,
+          pdfUrl: _currentSession.value!.pdfUrl,
+          questions: _currentSession.value!.questions,
+          answers: _currentSession.value!.answers,
+          startTime: _currentSession.value!.startTime,
+          endTime: DateTime.now(),
+          analytics: analytics,
+          isCompleted: true,
+        );
+
+        _currentSession.value = updatedSession;
+        _sessionAnalytics.value = analytics;
+        
+        await _localFirebaseService.updatePracticeSession(updatedSession);
+
+        Get.offAllNamed(AppRoutes.PRACTICE_RESULT);
       }
-
-      // Load analytics for result screen
-      _sessionAnalytics.value = updatedSession.analytics;
-
-      Get.offAllNamed(AppRoutes.PRACTICE_RESULT);
     } catch (e) {
       _errorMessage.value = e.toString();
       Get.snackbar('Lỗi', e.toString());
@@ -363,17 +719,123 @@ class PracticeController extends GetxController {
   }
 
   SessionAnalytics _calculateAnalytics() {
-    // Implementation for calculating session analytics
+    if (_currentSession.value == null || _currentSession.value!.answers.isEmpty) {
+      return SessionAnalytics(
+        averageSpeakingSpeed: 0,
+        averageClarity: 0,
+        averageEyeContactRatio: 0,
+        averageScore: 0,
+        totalDuration: Duration.zero,
+        emotionAverages: {},
+        strengths: [],
+        weaknesses: [],
+        improvements: [],
+      );
+    }
+
+    final answers = _currentSession.value!.answers;
+    final totalAnswers = answers.length;
+
+    // Tính toán điểm trung bình
+    final totalScore = answers.fold<int>(0, (sum, answer) => sum + answer.score);
+    final averageScore = totalScore / totalAnswers;
+
+    // Tính toán speaking speed trung bình
+    final totalSpeed = answers.fold<double>(0, (sum, answer) => sum + answer.speakingSpeed);
+    final averageSpeakingSpeed = totalSpeed / totalAnswers;
+
+    // Tính toán clarity trung bình
+    final totalClarity = answers.fold<double>(0, (sum, answer) => sum + answer.clarity);
+    final averageClarity = totalClarity / totalAnswers;
+
+    // Tính toán eye contact ratio trung bình
+    final totalEyeContact = answers.fold<double>(0, (sum, answer) => sum + answer.eyeContactRatio);
+    final averageEyeContactRatio = totalEyeContact / totalAnswers;
+
+    // Tính thời gian tổng
+    final totalDuration = _currentSession.value!.endTime != null
+        ? _currentSession.value!.endTime!.difference(_currentSession.value!.startTime)
+        : DateTime.now().difference(_currentSession.value!.startTime);
+
+    // Phân tích điểm mạnh và yếu
+    final strengths = <String>[];
+    final weaknesses = <String>[];
+    final improvements = <String>[];
+
+    if (averageScore >= 8) {
+      strengths.add('Trả lời xuất sắc với điểm cao');
+    } else if (averageScore >= 6) {
+      strengths.add('Trả lời tốt, có nội dung');
+    }
+
+    if (averageSpeakingSpeed >= 120 && averageSpeakingSpeed <= 160) {
+      strengths.add('Tốc độ nói phù hợp');
+    } else if (averageSpeakingSpeed < 100) {
+      weaknesses.add('Nói hơi chậm');
+      improvements.add('Luyện tập nói nhanh hơn');
+    } else if (averageSpeakingSpeed > 180) {
+      weaknesses.add('Nói hơi nhanh');
+      improvements.add('Giảm tốc độ để rõ ràng hơn');
+    }
+
+    if (averageClarity >= 75) {
+      strengths.add('Phát âm rõ ràng');
+    } else {
+      weaknesses.add('Cần cải thiện độ rõ ràng');
+      improvements.add('Luyện phát âm và nói chậm rãi');
+    }
+
+    if (averageEyeContactRatio >= 60) {
+      strengths.add('Giao tiếp mắt tốt');
+    } else {
+      weaknesses.add('Ít giao tiếp mắt');
+      improvements.add('Nhìn vào camera nhiều hơn');
+    }
+
+    if (averageScore < 6) {
+      improvements.add('Chuẩn bị nội dung kỹ hơn');
+      improvements.add('Luyện tập thường xuyên');
+    }
+
+    // Emotion averages
+    final emotionAverages = <String, double>{
+      'happiness': 0.0,
+      'confidence': 0.0,
+      'neutral': 0.0,
+      'nervous': 0.0,
+    };
+
+    int emotionCount = 0;
+    for (final answer in answers) {
+      for (final emotion in answer.emotions) {
+        emotionAverages['happiness'] = 
+            (emotionAverages['happiness']! + emotion.happiness);
+        emotionAverages['confidence'] = 
+            (emotionAverages['confidence']! + emotion.confidence);
+        emotionAverages['neutral'] = 
+            (emotionAverages['neutral']! + emotion.neutral);
+        emotionAverages['nervous'] = 
+            (emotionAverages['nervous']! + emotion.nervous);
+        emotionCount++;
+      }
+    }
+
+    if (emotionCount > 0) {
+      emotionAverages.forEach((key, value) {
+        emotionAverages[key] = value / emotionCount;
+      });
+    }
+
     return SessionAnalytics(
-      averageSpeakingSpeed: 0,
-      averageClarity: 0,
-      averageEyeContactRatio: 0,
-      averageScore: 0,
-      totalDuration: Duration.zero,
-      emotionAverages: {},
-      strengths: [],
-      weaknesses: [],
-      improvements: [],
+      averageSpeakingSpeed: averageSpeakingSpeed,
+      averageClarity: averageClarity,
+      averageEyeContactRatio: averageEyeContactRatio,
+      averageScore: averageScore,
+      totalDuration: totalDuration,
+      emotionAverages: emotionAverages,
+      strengths: strengths,
+      weaknesses: weaknesses,
+      improvements: improvements,
     );
   }
 
@@ -411,6 +873,8 @@ class PracticeController extends GetxController {
 
   @override
   void onClose() {
+    _behaviorDetectionTimer?.cancel();
+    _behaviorDetector.dispose();
     _cameraService.dispose();
     super.onClose();
   }

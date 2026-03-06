@@ -3,14 +3,21 @@ import 'package:google_generative_ai/google_generative_ai.dart';
 import '../models/practice_session.dart';
 
 class AIService {
-  late final GenerativeModel _model;
   final String? _openAIApiKey;
+  final String _geminiApiKey;
+
+  // Danh sách model Gemini khả dụng (từ Google AI Studio)
+  // Ref: https://ai.google.dev/gemini-api/docs/models/gemini
+  // Updated: March 2026 - Using latest production models
+  static const List<String> _availableModels = [
+    'gemini-2.5-flash', // Recommended: Latest, fast, cost-effective
+    'gemini-2.5-pro', // Advanced reasoning, most capable
+    'gemini-2.0-flash', // Alternative fast option
+  ];
 
   AIService({required String geminiApiKey, String? openAIApiKey})
-      : _openAIApiKey = openAIApiKey {
-    // Sử dụng gemini-1.5-flash (stable version - no beta/latest suffix)
-    _model = GenerativeModel(model: 'gemini-1.5-flash', apiKey: geminiApiKey);
-  }
+      : _geminiApiKey = geminiApiKey,
+        _openAIApiKey = openAIApiKey;
 
   // Generate questions based on PDF content and practice mode
   Future<List<String>> generateQuestions({
@@ -18,57 +25,141 @@ class AIService {
     required PracticeMode mode,
     int questionCount = 5,
   }) async {
-    try {
-      print(
-          '🤖 AI Service: Generating $questionCount questions for ${mode.name} mode');
+    print(
+        '🤖 AI Service: Generating $questionCount questions for ${mode.name} mode');
 
-      // Limit content length to avoid API limits
-      String processedContent = pdfContent;
-      if (pdfContent.length > 4000) {
-        processedContent = pdfContent.substring(0, 4000);
-        print('⚠️ Content truncated to 4000 characters for API limit');
-      }
+    // Limit content length to avoid API limits
+    String processedContent = pdfContent;
+    if (pdfContent.length > 4000) {
+      processedContent = pdfContent.substring(0, 4000);
+      print('⚠️ Content truncated to 4000 characters for API limit');
+    }
 
-      String prompt = _buildQuestionGenerationPrompt(
-        processedContent,
-        mode,
-        questionCount,
-      );
+    String prompt = _buildQuestionGenerationPrompt(
+      processedContent,
+      mode,
+      questionCount,
+    );
 
-      print('📤 Sending request to Gemini API...');
-      final response = await _model.generateContent([Content.text(prompt)]);
-      String responseText = response.text ?? '';
+    // Thử từng model cho đến khi thành công
+    for (int i = 0; i < _availableModels.length; i++) {
+      final modelName = _availableModels[i];
+      try {
+        print('📤 Trying model: $modelName...');
 
-      print('📥 Received response from Gemini API');
-      print(
-          'Response preview: ${responseText.substring(0, responseText.length > 200 ? 200 : responseText.length)}...');
-
-      final questions = _parseQuestionsFromResponse(responseText);
-
-      if (questions.isEmpty) {
-        print('❌ No questions parsed from AI response');
-        throw Exception(
-            'Gemini AI không thể tạo câu hỏi từ nội dung PDF. Vui lòng thử lại hoặc sử dụng file PDF khác.');
-      }
-
-      print('✅ Successfully generated ${questions.length} questions');
-      return questions;
-    } catch (e) {
-      print('❌ Error generating questions with Gemini: $e');
-
-      // Fallback to OpenAI if available
-      if (_openAIApiKey != null) {
-        print('🔄 Trying fallback to OpenAI...');
-        return await _generateQuestionsWithOpenAI(
-          pdfContent,
-          mode,
-          questionCount,
+        final model = GenerativeModel(
+          model: modelName,
+          apiKey: _geminiApiKey,
+          generationConfig: GenerationConfig(
+            temperature: 0.7,
+            topK: 40,
+            topP: 0.95,
+            maxOutputTokens: 1024,
+          ),
         );
-      }
 
-      // Throw error - không dùng fallback nữa
-      throw Exception(
-          'Không thể tạo câu hỏi từ Gemini AI: ${e.toString()}. Vui lòng kiểm tra kết nối internet và thử lại.');
+        // Add timeout to prevent hanging
+        final response =
+            await model.generateContent([Content.text(prompt)]).timeout(
+          const Duration(seconds: 30),
+          onTimeout: () {
+            throw Exception('Request timeout after 30 seconds');
+          },
+        );
+
+        String responseText = response.text ?? '';
+
+        if (responseText.isEmpty) {
+          throw Exception('Empty response from Gemini API');
+        }
+
+        print('📥 Received response from Gemini API ($modelName)');
+        print(
+            'Response preview: ${responseText.substring(0, responseText.length > 200 ? 200 : responseText.length)}...');
+
+        final questions = _parseQuestionsFromResponse(responseText);
+
+        if (questions.isEmpty) {
+          print('❌ No questions parsed from AI response');
+          throw Exception('Gemini AI không thể tạo câu hỏi từ nội dung PDF.');
+        }
+
+        // Ensure we have enough questions
+        if (questions.length < questionCount) {
+          print(
+              '⚠️ Only got ${questions.length}/$questionCount questions, adding generic ones...');
+          questions.addAll(_getFallbackQuestions(mode, pdfContent)
+              .take(questionCount - questions.length));
+        }
+
+        print(
+            '✅ Successfully generated ${questions.length} questions with $modelName');
+        return questions.take(questionCount).toList();
+      } catch (e) {
+        final errorMsg = e.toString();
+        print('❌ Error with model $modelName: $errorMsg');
+
+        // Check if it's an API key issue
+        if (errorMsg.contains('API key') ||
+            errorMsg.contains('PERMISSION_DENIED') ||
+            errorMsg.contains('API_KEY_INVALID')) {
+          print(
+              '🔑 API Key Error detected. Please verify your Gemini API key.');
+          print('   Get a new key at: https://aistudio.google.com/apikey');
+        }
+
+        // Nếu là model cuối cùng
+        if (i == _availableModels.length - 1) {
+          // Fallback to OpenAI if available
+          if (_openAIApiKey != null) {
+            print('🔄 All Gemini models failed. Trying fallback to OpenAI...');
+            try {
+              return await _generateQuestionsWithOpenAI(
+                pdfContent,
+                mode,
+                questionCount,
+              );
+            } catch (openAiError) {
+              print('❌ OpenAI also failed: $openAiError');
+            }
+          }
+
+          // Sử dụng fallback questions khi tất cả AI đều fail
+          print('⚠️ All AI services failed. Using fallback questions...');
+          print('💡 Tip: Check API key at https://aistudio.google.com/apikey');
+          return _getFallbackQuestions(mode, pdfContent);
+        }
+
+        // Thử model tiếp theo
+        print('⏭️ Trying next model...');
+        await Future.delayed(const Duration(milliseconds: 500)); // Rate limit
+      }
+    }
+
+    // Không bao giờ reach được đây, nhưng cần return để tránh lỗi compile
+    return _getFallbackQuestions(mode, pdfContent);
+  }
+
+  // Generate fallback questions when AI fails
+  List<String> _getFallbackQuestions(PracticeMode mode, String pdfContent) {
+    print('📝 Generating fallback questions based on mode: ${mode.name}');
+
+    if (mode == PracticeMode.interview) {
+      return [
+        'Hãy giới thiệu về bản thân và kinh nghiệm làm việc của bạn.',
+        'Bạn có thể chia sẻ về dự án hoặc công việc nổi bật nhất mà bạn đã tham gia?',
+        'Điểm mạnh và điểm yếu của bạn là gì? Bạn đang cải thiện điểm yếu như thế nào?',
+        'Tại sao bạn muốn làm việc ở vị trí này và tại công ty này?',
+        'Bạn mong muốn phát triển sự nghiệp như thế nào trong 3-5 năm tới?',
+      ];
+    } else {
+      return [
+        'Hãy giới thiệu tổng quan về chủ đề bạn sẽ thuyết trình.',
+        'Bạn có thể giải thích chi tiết về ý chính thứ nhất trong tài liệu không?',
+        'Những lợi ích hoặc ứng dụng thực tế của nội dung này là gì?',
+        'Bạn có thể đưa ra ví dụ minh họa cho nội dung bạn trình bày?',
+        'Kết luận và những điểm cần ghi nhớ quan trọng nhất là gì?',
+      ];
     }
   }
 
@@ -78,23 +169,39 @@ class AIService {
     required String answer,
     required PracticeMode mode,
   }) async {
-    try {
-      String prompt = _buildEvaluationPrompt(question, answer, mode);
+    String prompt = _buildEvaluationPrompt(question, answer, mode);
 
-      final response = await _model.generateContent([Content.text(prompt)]);
-      String responseText = response.text ?? '';
+    // Thử từng model cho đến khi thành công
+    for (final modelName in _availableModels) {
+      try {
+        print('📤 Evaluating answer with model: $modelName...');
 
-      return _parseEvaluationFromResponse(responseText);
-    } catch (e) {
-      print('Error evaluating answer with Gemini: $e');
+        final model = GenerativeModel(
+          model: modelName,
+          apiKey: _geminiApiKey,
+        );
 
-      // Fallback to OpenAI if available
-      if (_openAIApiKey != null) {
-        return await _evaluateAnswerWithOpenAI(question, answer, mode);
+        final response = await model.generateContent([Content.text(prompt)]);
+        String responseText = response.text ?? '';
+
+        final evaluation = _parseEvaluationFromResponse(responseText);
+        print('✅ Answer evaluated successfully with $modelName');
+        return evaluation;
+      } catch (e) {
+        print('❌ Error with model $modelName: $e');
+        // Thử model tiếp theo
+        continue;
       }
-
-      return _getFallbackEvaluation();
     }
+
+    // Nếu tất cả model đều fail, thử OpenAI hoặc dùng fallback
+    if (_openAIApiKey != null) {
+      print('🔄 All Gemini models failed. Trying OpenAI...');
+      return await _evaluateAnswerWithOpenAI(question, answer, mode);
+    }
+
+    print('⚠️ Using fallback evaluation');
+    return _getFallbackEvaluation();
   }
 
   // Generate session analysis and recommendations
@@ -103,17 +210,34 @@ class AIService {
     required SessionAnalytics analytics,
     required PracticeMode mode,
   }) async {
-    try {
-      String prompt = _buildAnalysisPrompt(answers, analytics, mode);
+    String prompt = _buildAnalysisPrompt(answers, analytics, mode);
 
-      final response = await _model.generateContent([Content.text(prompt)]);
-      String responseText = response.text ?? '';
+    // Thử từng model cho đến khi thành công
+    for (final modelName in _availableModels) {
+      try {
+        print('📤 Generating session analysis with model: $modelName...');
 
-      return _parseAnalysisFromResponse(responseText);
-    } catch (e) {
-      print('Error generating session analysis: $e');
-      return _getFallbackAnalysis();
+        final model = GenerativeModel(
+          model: modelName,
+          apiKey: _geminiApiKey,
+        );
+
+        final response = await model.generateContent([Content.text(prompt)]);
+        String responseText = response.text ?? '';
+
+        final analysis = _parseAnalysisFromResponse(responseText);
+        print('✅ Session analysis generated successfully with $modelName');
+        return analysis;
+      } catch (e) {
+        print('❌ Error with model $modelName: $e');
+        // Thử model tiếp theo
+        continue;
+      }
     }
+
+    // Nếu tất cả model đều fail, dùng fallback
+    print('⚠️ Using fallback analysis');
+    return _getFallbackAnalysis();
   }
 
   // Private methods for prompt building

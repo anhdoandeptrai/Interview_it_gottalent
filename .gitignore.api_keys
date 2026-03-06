@@ -1,0 +1,16 @@
+# Environment Variables - DO NOT COMMIT!
+.env
+.env.*
+
+# API Keys
+*_api_key*
+*.key
+
+# Test files with sensitive data
+test_gemini_*.dart
+list_models.dart
+
+# Firebase config (already in .gitignore but emphasize)
+google-services.json
+GoogleService-Info.plist
+firebase_options.dart
