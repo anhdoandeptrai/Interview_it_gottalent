@@ -1,5 +1,6 @@
 import 'ai_service.dart';
 import '../models/practice_session.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 /// Test file để kiểm tra tính năng tạo câu hỏi từ text
 /// Run: flutter run lib/services/question_generator_test.dart
@@ -7,7 +8,16 @@ import '../models/practice_session.dart';
 void main() async {
   print('🧪 Testing Question Generator with Gemini AI\n');
 
-  const geminiApiKey = 'AIzaSyDWJtGE9RJ1RzvqV-zNAeebZsZu7UOCwsk';
+  // Load .env file
+  await dotenv.load(fileName: ".env");
+  final geminiApiKey = dotenv.env['GEMINI_API_KEY'];
+
+  if (geminiApiKey == null || geminiApiKey.isEmpty) {
+    print('❌ GEMINI_API_KEY not found in .env file');
+    print('   Create .env file with: GEMINI_API_KEY=your_key_here');
+    return;
+  }
+
   final aiService = AIService(geminiApiKey: geminiApiKey);
 
   // Sample PDF content for testing

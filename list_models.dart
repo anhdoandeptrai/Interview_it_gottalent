@@ -1,10 +1,19 @@
 import 'dart:io';
 import 'dart:convert';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 /// List all available Gemini models using REST API
 /// This bypasses the SDK to directly check what models are available
 void main() async {
-  const apiKey = 'AIzaSyDWJtGE9RJ1RzvqV-zNAeebZsZu7UOCwsk';
+  // Load .env file
+  await dotenv.load(fileName: ".env");
+  final apiKey = dotenv.env['GEMINI_API_KEY'];
+
+  if (apiKey == null || apiKey.isEmpty) {
+    print('❌ GEMINI_API_KEY not found in .env file');
+    print('   Create .env file with: GEMINI_API_KEY=your_key_here');
+    return;
+  }
 
   print('🔍 Checking available Gemini models via REST API...\n');
   print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');

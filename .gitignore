@@ -9,6 +9,13 @@
 .pub/
 /build/
 
+# Environment variables & API Keys
+.env
+.env.local
+.env.production
+*.api_key
+api_keys.txt
+
 # Web related
 lib/generated_plugin_registrant.dart
 
