@@ -3,7 +3,6 @@ import 'package:google_generative_ai/google_generative_ai.dart';
 import '../models/practice_session.dart';
 
 class AIService {
-  final String? _openAIApiKey;
   final String _geminiApiKey;
 
   // Danh sách model Gemini khả dụng (từ Google AI Studio)
@@ -15,9 +14,7 @@ class AIService {
     'gemini-2.0-flash', // Alternative fast option
   ];
 
-  AIService({required String geminiApiKey, String? openAIApiKey})
-      : _geminiApiKey = geminiApiKey,
-        _openAIApiKey = openAIApiKey;
+  AIService({required String geminiApiKey}) : _geminiApiKey = geminiApiKey;
 
   // Generate questions based on PDF content and practice mode
   Future<List<String>> generateQuestions({
@@ -86,10 +83,9 @@ class AIService {
 
         // Ensure we have enough questions
         if (questions.length < questionCount) {
-          print(
-              '⚠️ Only got ${questions.length}/$questionCount questions, adding generic ones...');
-          questions.addAll(_getFallbackQuestions(mode, pdfContent)
-              .take(questionCount - questions.length));
+          print('⚠️ Only got ${questions.length}/$questionCount questions');
+          throw Exception(
+              'Không đủ câu hỏi được tạo. Cần $questionCount nhưng chỉ có ${questions.length}');
         }
 
         print(
@@ -110,24 +106,11 @@ class AIService {
 
         // Nếu là model cuối cùng
         if (i == _availableModels.length - 1) {
-          // Fallback to OpenAI if available
-          if (_openAIApiKey != null) {
-            print('🔄 All Gemini models failed. Trying fallback to OpenAI...');
-            try {
-              return await _generateQuestionsWithOpenAI(
-                pdfContent,
-                mode,
-                questionCount,
-              );
-            } catch (openAiError) {
-              print('❌ OpenAI also failed: $openAiError');
-            }
-          }
-
-          // Sử dụng fallback questions khi tất cả AI đều fail
-          print('⚠️ All AI services failed. Using fallback questions...');
+          // Throw error instead of using fallback
+          print('❌ All AI models failed. Cannot generate questions.');
           print('💡 Tip: Check API key at https://aistudio.google.com/apikey');
-          return _getFallbackQuestions(mode, pdfContent);
+          throw Exception(
+              'Không thể tạo câu hỏi từ AI. Vui lòng kiểm tra kết nối mạng và API key.');
         }
 
         // Thử model tiếp theo
@@ -136,31 +119,8 @@ class AIService {
       }
     }
 
-    // Không bao giờ reach được đây, nhưng cần return để tránh lỗi compile
-    return _getFallbackQuestions(mode, pdfContent);
-  }
-
-  // Generate fallback questions when AI fails
-  List<String> _getFallbackQuestions(PracticeMode mode, String pdfContent) {
-    print('📝 Generating fallback questions based on mode: ${mode.name}');
-
-    if (mode == PracticeMode.interview) {
-      return [
-        'Hãy giới thiệu về bản thân và kinh nghiệm làm việc của bạn.',
-        'Bạn có thể chia sẻ về dự án hoặc công việc nổi bật nhất mà bạn đã tham gia?',
-        'Điểm mạnh và điểm yếu của bạn là gì? Bạn đang cải thiện điểm yếu như thế nào?',
-        'Tại sao bạn muốn làm việc ở vị trí này và tại công ty này?',
-        'Bạn mong muốn phát triển sự nghiệp như thế nào trong 3-5 năm tới?',
-      ];
-    } else {
-      return [
-        'Hãy giới thiệu tổng quan về chủ đề bạn sẽ thuyết trình.',
-        'Bạn có thể giải thích chi tiết về ý chính thứ nhất trong tài liệu không?',
-        'Những lợi ích hoặc ứng dụng thực tế của nội dung này là gì?',
-        'Bạn có thể đưa ra ví dụ minh họa cho nội dung bạn trình bày?',
-        'Kết luận và những điểm cần ghi nhớ quan trọng nhất là gì?',
-      ];
-    }
+    // Should never reach here
+    throw Exception('Unexpected error in question generation');
   }
 
   // Evaluate answer using AI
@@ -194,13 +154,8 @@ class AIService {
       }
     }
 
-    // Nếu tất cả model đều fail, thử OpenAI hoặc dùng fallback
-    if (_openAIApiKey != null) {
-      print('🔄 All Gemini models failed. Trying OpenAI...');
-      return await _evaluateAnswerWithOpenAI(question, answer, mode);
-    }
-
-    print('⚠️ Using fallback evaluation');
+    // Nếu tất cả model đều fail, dùng fallback
+    print('⚠️ All Gemini models failed. Using fallback evaluation');
     return _getFallbackEvaluation();
   }
 
@@ -560,27 +515,7 @@ Vui lòng trả lời theo định dạng JSON:
     return analysis;
   }
 
-  // OpenAI fallback methods (if needed)
-  Future<List<String>> _generateQuestionsWithOpenAI(
-    String content,
-    PracticeMode mode,
-    int count,
-  ) async {
-    // Throw error - OpenAI not implemented
-    throw Exception(
-        'OpenAI integration chưa được triển khai. Chỉ hỗ trợ Gemini AI.');
-  }
-
-  Future<Map<String, dynamic>> _evaluateAnswerWithOpenAI(
-    String question,
-    String answer,
-    PracticeMode mode,
-  ) async {
-    // Implement OpenAI API call if needed
-    return _getFallbackEvaluation();
-  }
-
-  // Fallback methods removed - all questions must come from Gemini AI
+  // Fallback evaluation when AI fails
 
   Map<String, dynamic> _getFallbackEvaluation() {
     return {

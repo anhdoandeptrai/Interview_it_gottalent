@@ -70,25 +70,12 @@ class PracticeProvider extends ChangeNotifier {
         throw Exception('Invalid Gemini API key');
       }
 
-      _aiService = AIService(
-        geminiApiKey: geminiApiKey,
-        openAIApiKey: openAIApiKey,
-      );
+      _aiService = AIService(geminiApiKey: geminiApiKey);
       print('AI Service initialized successfully');
     } catch (e) {
       print('Error initializing AI Service: $e');
-      // Continue without crashing - AI service will use fallbacks
-      try {
-        _aiService = AIService(
-          geminiApiKey: 'dummy-key-for-fallback',
-          openAIApiKey: null,
-        );
-        print('AI Service initialized with fallback key');
-      } catch (fallbackError) {
-        print(
-            'Failed to initialize AI Service even with fallback: $fallbackError');
-        // Continue - will rely entirely on fallback questions
-      }
+      throw Exception(
+          'Không thể khởi tạo AI Service. Vui lòng kiểm tra API key trong file .env');
     }
   }
 

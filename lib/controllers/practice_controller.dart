@@ -10,8 +10,6 @@ import '../services/pdf_service.dart';
 import '../services/ai_service.dart';
 import '../services/speech_service.dart';
 import '../services/camera_service.dart';
-import '../services/ai_behavior_detector_service.dart';
-import '../models/behavior_result.dart';
 import '../controllers/auth_controller.dart';
 import '../routes/app_routes.dart';
 
